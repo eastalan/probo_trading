@@ -1,0 +1,6 @@
+data/
+fotmob_opt_event_logs/
+venv_sw_test/
+fotmob_opt_event_logs/
+**/fotmob_opta_event_logs/
+**.DS_Store**
