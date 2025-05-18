@@ -9,12 +9,12 @@ EVENTS_FILE_PATH = os.path.join(EVENTS_FILE_DIR, EVENTS_FILE_NAME)
 MARKET_DATA_BASE_DIR = os.path.join("data", "market_data")
 #SINGLE_EVENT_OUTPUT_DIR = os.path.join("data", "single_event_market_data")
 
-# --- Brave Browser Configuration (macOS) ---
+# --- Brave Browser Configuration (macOSWORKER_LAUNCH_DELAY_SECONDS = 2  # or 1, or whatever delay you want between launches) ---
 BRAVE_APP_PATH = "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
 
 CHECK_FOR_LOGIN_OVERLAY = True
 XPATH_LOGIN_SIGNUP_OVERLAY = "//*[@id='login_btn_navbar']"
-WAIT_FOR_LOGIN_OVERLAY_SECONDS = 100
+WAIT_FOR_LOGIN_OVERLAY_SECONDS = 15
 # Profile for event_data.py (main script for listing events)
 BRAVE_PROFILE_TO_USE_EVENT_LISTER = "Default"
 
@@ -34,6 +34,7 @@ HEADLESS_MODE = False # CHANGE THIS TO True FOR ALL SCRIPTS TO RUN HEADLESS
 # --- Worker Process Configuration ---
 INITIAL_PAGE_LOAD_WAIT_SECONDS_WORKER = 15
 WORKER_POLLING_INTERVAL_SECONDS = 1.0 / 5.0
+WORKER_LAUNCH_DELAY_SECONDS = 20  # or 1, or whatever delay you want between launches
 
 # --- XPaths for Order Book Data ---
 XPATH_YES_ALL_PRICES = "//table[.//th//font[contains(text(),'Yes') and @color='#197BFF']]//td[contains(@class, 'style_order__book__table__left__')]"

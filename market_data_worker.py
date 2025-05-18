@@ -304,9 +304,11 @@ def record_market_data_for_event(event_name, event_url, trading_started_on, even
     max_consecutive_fetch_errors = 10
 
     try:
+        last_refresh_time = time.monotonic()  # Track last refresh for page
         while True:
             loop_start_time = time.monotonic()
-            timestamp = datetime.datetime.now().isoformat()
+            # Format timestamp as "YYYY-MM-DD HH:MM:SS.ssssss" (no 'T')
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
             try:
                 _ = driver.title
             except WebDriverException as e_wd_responsive:
@@ -330,11 +332,21 @@ def record_market_data_for_event(event_name, event_url, trading_started_on, even
                 except Exception as e_write:
                     print(f"[Worker PID: {worker_pid}] Error writing data to {output_filepath}: {e_write}"); consecutive_fetch_errors += 1
             else:
-                # print(f"[Worker PID: {worker_pid}] Failed to fetch any valid order book data for '{event_name}'.") # Can be noisy
                 consecutive_fetch_errors += 1
+
+            # --- Refresh the page every 4 minutes (240 seconds) ---
+            if time.monotonic() - last_refresh_time >= 240:
+                print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [Worker PID: {worker_pid}] Refreshing page to keep data fresh...")
+                try:
+                    driver.refresh()
+                    print(f"[Worker PID: {worker_pid}] Page refreshed successfully.")
+                except Exception as e:
+                    print(f"[Worker PID: {worker_pid}] Error refreshing page: {e}")
+                last_refresh_time = time.monotonic()
 
             if consecutive_fetch_errors >= max_consecutive_fetch_errors:
                 print(f"[Worker PID: {worker_pid}] Max ({max_consecutive_fetch_errors}) consecutive fetch errors for '{event_name}'. Stopping worker.")
+                time.sleep(15)
                 break
             processing_time = time.monotonic() - loop_start_time
             sleep_duration = config.WORKER_POLLING_INTERVAL_SECONDS - processing_time

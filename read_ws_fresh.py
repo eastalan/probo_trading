@@ -23,10 +23,10 @@ BRAVE_BINARY_PATH = "/Applications/Brave Browser.app/Contents/MacOS/Brave Browse
 # Example for Linux (find with 'which brave-browser'):
 # BRAVE_BINARY_PATH = "/usr/bin/brave-browser"
 
-FOTMOB_MATCH_URL = "https://www.fotmob.com/en-GB/match/4763853/playbyplay" # Example, change if needed
+FOTMOB_MATCH_URL = "https://www.fotmob.com/en-GB/match/4694438/playbyplay" # Example, change if needed
 POLL_INTERVAL = 0.2 # As per your last script
 INITIAL_PAGE_LOAD_WAIT = 3 # As per your last script
-HEADLESS_BROWSER = True
+HEADLESS_BROWSER = False # Set to True if you want to run in headless mode
 LOG_OUTPUT_DIR = "fotmob_opta_event_logs"
 
 # --- End of User Configuration ---
@@ -156,6 +156,40 @@ def extract_event_details_from_page(driver_instance):
         return None, False, f"Error extracting details: {str(e)}"
 
 
+def get_teams_and_date_from_header(driver_instance):
+    """
+    Extracts team names and match date from the TeamsHeader section.
+    Returns (team1, team2, match_date_str, live_time_str)
+    """
+    try:
+        driver_instance.switch_to.default_content()
+        soup = BeautifulSoup(driver_instance.page_source, 'html.parser')
+        header = soup.find('section', class_=re.compile(r"TeamsHeader"))
+        if not header:
+            return None, None, None, None
+
+        # Team names
+        team_spans = header.find_all('span', class_=re.compile(r'TeamNameItself-TeamNameOnTabletUp'))
+        if len(team_spans) >= 2:
+            team1 = team_spans[0].get_text(strip=True)
+            team2 = team_spans[1].get_text(strip=True)
+        else:
+            # Fallback: try mobile class
+            team_spans = header.find_all('span', class_=re.compile(r'TeamNameItself-TeamNameOnMobile'))
+            team1 = team_spans[0].get_text(strip=True) if len(team_spans) > 0 else "Team1"
+            team2 = team_spans[1].get_text(strip=True) if len(team_spans) > 1 else "Team2"
+
+        # Match date (fallback to today if not found)
+        match_date = datetime.datetime.now().strftime("%Y%m%d")
+
+        # Live time
+        live_time_span = header.find('span', class_=re.compile(r'MFStatusLiveTimeText'))
+        live_time_str = live_time_span.get_text(strip=True) if live_time_span else ""
+
+        return team1, team2, match_date, live_time_str
+    except Exception as e:
+        return "Team1", "Team2", datetime.datetime.now().strftime("%Y%m%d"), ""
+
 def monitor_fotmob_events():
     driver, temp_profile_dir = setup_brave_driver(BRAVE_BINARY_PATH)
     if not driver:
@@ -169,24 +203,19 @@ def monitor_fotmob_events():
             print(f"Error creating log directory {LOG_OUTPUT_DIR}: {e}. Exiting.")
             if driver: driver.quit(); return
 
-    match_name_slug = "unknown_match"
-    if FOTMOB_MATCH_URL:
-        try:
-            url_parts = FOTMOB_MATCH_URL.split('/')
-            slug_candidate = "fotmob_event" # Default
-            if len(url_parts) > 3 and url_parts[-2].isdigit() and not url_parts[-3].isdigit() and "match" not in url_parts[-3].lower() :
-                slug_candidate = url_parts[-3]
-            elif len(url_parts) > 2 and url_parts[-1] == "playbyplay" and not url_parts[-2].isdigit():
-                 slug_candidate = url_parts[-2]
-            elif len(url_parts) > 1 and not url_parts[-1].isdigit() and url_parts[-1] != "playbyplay" and not url_parts[-1].isdigit() :
-                 slug_candidate = url_parts[-1]
-            elif len(url_parts) > 1 and url_parts[-1].isdigit() and len(url_parts) > 2 and not url_parts[-2].isdigit():
-                 slug_candidate = url_parts[-2]
-            match_name_slug = slugify_filename(slug_candidate.split("?")[0])+ "_" + url_parts[-2]
-        except Exception:
-            match_name_slug = slugify_filename("fotmob_event_fallback")
+    # --- Extract team names and date for log filename ---
+    print("Loading page to extract team names and date for log filename...")
+    try:
+        driver.get(FOTMOB_MATCH_URL)
+        time.sleep(INITIAL_PAGE_LOAD_WAIT)
+    except Exception as e:
+        print(f"Error loading page for team extraction: {e}")
+        if driver: driver.quit(); return
 
-    log_filename = f"{match_name_slug}_opta_events.log"
+    team1, team2, match_date, _ = get_teams_and_date_from_header(driver)
+    team1_slug = slugify_filename(team1)
+    team2_slug = slugify_filename(team2)
+    log_filename = f"{team1_slug}_{team2_slug}_{match_date}.log"
     log_filepath = os.path.join(LOG_OUTPUT_DIR, log_filename)
     print(f"Logging Opta events to: {log_filepath}")
 
@@ -194,6 +223,7 @@ def monitor_fotmob_events():
         try:
             with open(log_filepath, 'w', encoding='utf-8') as f:
                 f.write(f"# Opta events for match: {FOTMOB_MATCH_URL}\n")
+                f.write(f"# Teams: {team1} vs {team2}\n")
                 f.write(f"# Log session started: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write("#----------------------------------------------------------\n")
             print(f"Created new log file with header: {log_filepath}")
@@ -216,29 +246,49 @@ def monitor_fotmob_events():
     last_event_string_for_console = None
     last_event_string_for_file = None
     consecutive_not_found_count = 0
-    MAX_CONSECUTIVE_NOT_FOUND_BEFORE_CONSOLE_WARNING = 10 # Reduced slightly for faster feedback
+    MAX_CONSECUTIVE_NOT_FOUND_BEFORE_CONSOLE_WARNING = 10
 
     try:
         while True:
+            # Get live time from header for each event
+            _, _, _, live_time_str = get_teams_and_date_from_header(driver)
             current_formatted_event, event_found, status_msg = extract_event_details_from_page(driver)
             timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+
+            # --- Live clock checks ---
+            if not live_time_str:
+                print(f"[{timestamp}] Live clock not active. Pausing event polling. Will retry every 10 seconds...")
+                while True:
+                    time.sleep(10)
+                    _, _, _, live_time_str = get_teams_and_date_from_header(driver)
+                    if live_time_str:
+                        print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Live clock resumed: {live_time_str}. Resuming event polling.")
+                        break
+                    if live_time_str and live_time_str.strip().lower() in ["full time", "ft"]:
+                        print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Match ended ({live_time_str}). Terminating program.")
+                        return
+
+            if live_time_str.strip().lower() in ["full time", "ft"]:
+                print(f"[{timestamp}] Match ended ({live_time_str}). Terminating program.")
+                break
+
+            # Append live time to event output
+            live_time_display = f" [Live: {live_time_str}]" if live_time_str else ""
 
             if event_found and current_formatted_event:
                 consecutive_not_found_count = 0
                 if current_formatted_event != last_event_string_for_console:
-                    #print("--------------------------------------")
-                    print(f"[{timestamp}] {current_formatted_event}") # Using the new format
-                    #print("--------------------------------------\n")
+                    print(f"[{timestamp}]{live_time_display} {current_formatted_event}")
                     last_event_string_for_console = current_formatted_event
 
                 if current_formatted_event != last_event_string_for_file:
                     try:
                         with open(log_filepath, 'a', encoding='utf-8') as f:
-                            f.write(f"[{timestamp}] {current_formatted_event}\n") # Using the new format
+                            f.write(f"[{timestamp}]{live_time_display} {current_formatted_event}\n")
                         last_event_string_for_file = current_formatted_event
                     except Exception as e:
                         print(f"Error writing to log file {log_filepath}: {e}")
-            else: # Event not found or extraction failed
+            else:
                 consecutive_not_found_count += 1
                 if consecutive_not_found_count == 1 or \
                    consecutive_not_found_count % MAX_CONSECUTIVE_NOT_FOUND_BEFORE_CONSOLE_WARNING == 0:
@@ -254,7 +304,6 @@ def monitor_fotmob_events():
         print("Closing Brave browser.")
         if driver:
             driver.quit()
-        # Clean up the temporary profile directory
         if temp_profile_dir:
             try:
                 import shutil
