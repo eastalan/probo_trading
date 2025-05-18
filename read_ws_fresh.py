@@ -12,6 +12,8 @@ from bs4 import BeautifulSoup
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 import pdb
 import tempfile
+import sys
+import subprocess
 
 # --- User Configuration for this Specific Script ---
 
@@ -23,10 +25,10 @@ BRAVE_BINARY_PATH = "/Applications/Brave Browser.app/Contents/MacOS/Brave Browse
 # Example for Linux (find with 'which brave-browser'):
 # BRAVE_BINARY_PATH = "/usr/bin/brave-browser"
 
-FOTMOB_MATCH_URL = "https://www.fotmob.com/en-GB/match/4694438/playbyplay" # Example, change if needed
+FOTMOB_MATCH_URL = "https://www.fotmob.com/en-GB/match/4506589/playbyplay" # Example, change if needed
 POLL_INTERVAL = 0.2 # As per your last script
 INITIAL_PAGE_LOAD_WAIT = 3 # As per your last script
-HEADLESS_BROWSER = False # Set to True if you want to run in headless mode
+HEADLESS_BROWSER = "--headless" in sys.argv or os.environ.get("HEADLESS_BROWSER", "False") == "True" # Set to True if you want to run in headless mode
 LOG_OUTPUT_DIR = "fotmob_opta_event_logs"
 
 # --- End of User Configuration ---
@@ -254,7 +256,7 @@ def monitor_fotmob_events():
             _, _, _, live_time_str = get_teams_and_date_from_header(driver)
             current_formatted_event, event_found, status_msg = extract_event_details_from_page(driver)
             timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-
+            #pdb.set_trace() # Debugging line to pause execution for inspection
             # --- Live clock checks ---
             if not live_time_str:
                 print(f"[{timestamp}] Live clock not active. Pausing event polling. Will retry every 10 seconds...")
@@ -264,12 +266,21 @@ def monitor_fotmob_events():
                     if live_time_str:
                         print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Live clock resumed: {live_time_str}. Resuming event polling.")
                         break
+                    if live_time_str and live_time_str.strip().lower() in ["half time", "ht"]:
+                        time.sleep(POLL_INTERVAL)
+                        return
                     if live_time_str and live_time_str.strip().lower() in ["full time", "ft"]:
                         print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Match ended ({live_time_str}). Terminating program.")
                         return
 
             if live_time_str.strip().lower() in ["full time", "ft"]:
                 print(f"[{timestamp}] Match ended ({live_time_str}). Terminating program.")
+                try:
+                    subprocess.Popen(
+                        ["python3", os.path.join(os.path.dirname(__file__), "update_hasended.py"), FOTMOB_MATCH_URL]
+                    )
+                except Exception as e:
+                    print(f"Error updating fotmob_matches.psv: {e}")
                 break
 
             # Append live time to event output
@@ -280,6 +291,15 @@ def monitor_fotmob_events():
                 if current_formatted_event != last_event_string_for_console:
                     print(f"[{timestamp}]{live_time_display} {current_formatted_event}")
                     last_event_string_for_console = current_formatted_event
+
+                    # Call alert.py to read out the event
+                    if "goal" in current_formatted_event.lower():
+                        try:
+                            subprocess.Popen(
+                                ["python3", os.path.join(os.path.dirname(__file__), "alert.py"), current_formatted_event]
+                            )
+                        except Exception as e:
+                            print(f"Could not trigger voice alert: {e}")
 
                 if current_formatted_event != last_event_string_for_file:
                     try:
