@@ -16,7 +16,7 @@ CHECK_FOR_LOGIN_OVERLAY = True
 XPATH_LOGIN_SIGNUP_OVERLAY = "//*[@id='login_btn_navbar']"
 WAIT_FOR_LOGIN_OVERLAY_SECONDS = 15
 # Profile for event_data.py (main script for listing events)
-BRAVE_PROFILE_TO_USE_EVENT_LISTER = "Default"
+BRAVE_PROFILE_TO_USE_EVENT_LISTER = None
 
 # Profile for probo_monitor.py (standalone single event monitor)
 BRAVE_PROFILE_TO_USE_STANDALONE = "Default"
@@ -29,7 +29,7 @@ WORKER_PROFILE_NAMES = ["Default","Profile 2", "worker2", "worker3"] # !!! UPDAT
 WORKER_PROFILE_NAMES = []
 
 # --- Global Headless Mode Configuration ---
-HEADLESS_MODE = True # CHANGE THIS TO True FOR ALL SCRIPTS TO RUN HEADLESS
+HEADLESS_MODE = False # CHANGE THIS TO True FOR ALL SCRIPTS TO RUN HEADLESS
 
 # --- Worker Process Configuration ---
 INITIAL_PAGE_LOAD_WAIT_SECONDS_WORKER = 15
@@ -62,7 +62,7 @@ ELEMENT_VISIBILITY_TIMEOUT_EVENT_LISTER = 15
 BASE_URL_PROBO = "https://probo.in"
 
 # --- Standalone Monitor (probo_monitor.py) Configuration ---
-STANDALONE_EVENT_URL_TO_MONITOR = "https://probo.in/events/everton-to-win-against-southampton-paeyjn?categoryI=4"
+STANDALONE_EVENT_URL_TO_MONITOR = "https://probo.in/events/chelsea-to-win-against-flamengo-z5ne8j?categoryId=4"
 STANDALONE_INITIAL_LOAD_SECONDS = 3
 STANDALONE_POLLING_INTERVAL = 1.0 / 5.0
 

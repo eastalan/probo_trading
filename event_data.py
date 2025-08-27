@@ -16,30 +16,29 @@ import config # Import global configurations
 def setup_driver_for_event_lister():
     options = Options()
     try:
-        home_directory = os.path.expanduser("~")
-        brave_user_data_dir_base = os.path.join(home_directory, "Library/Application Support/BraveSoftware/")
-        brave_user_data_dir = os.path.join(brave_user_data_dir_base, "Brave-Browser/")
+        # Only use a profile if specified in config
+        if getattr(config, "BRAVE_PROFILE_TO_USE_EVENT_LISTER", None):
+            home_directory = os.path.expanduser("~")
+            brave_user_data_dir_base = os.path.join(home_directory, "Library/Application Support/BraveSoftware/")
+            brave_user_data_dir = os.path.join(brave_user_data_dir_base, "Brave-Browser/")
+            if not os.path.isdir(brave_user_data_dir):
+                print(f"Error: Brave user data directory not found at: {brave_user_data_dir}")
+                return None
+            profile_path_to_check = os.path.join(brave_user_data_dir, config.BRAVE_PROFILE_TO_USE_EVENT_LISTER)
+            if not os.path.isdir(profile_path_to_check):
+                print(f"Error: Brave profile '{config.BRAVE_PROFILE_TO_USE_EVENT_LISTER}' not found within {brave_user_data_dir}")
+                return None
+            options.add_argument(f"user-data-dir={brave_user_data_dir}")
+            options.add_argument(f"profile-directory={config.BRAVE_PROFILE_TO_USE_EVENT_LISTER}")
+            print(f"Attempting to use Brave user data dir: {brave_user_data_dir}")
+            print(f"Attempting to use Brave profile: {config.BRAVE_PROFILE_TO_USE_EVENT_LISTER}")
+        else:
+            print("No Brave profile specified in config. Spinning up a fresh instance.")
 
-        if not os.path.isdir(brave_user_data_dir):
-            print(f"Error: Brave user data directory not found at: {brave_user_data_dir}")
-            return None
-        
-        # Uses BRAVE_PROFILE_TO_USE_EVENT_LISTER from config
-        profile_path_to_check = os.path.join(brave_user_data_dir, config.BRAVE_PROFILE_TO_USE_EVENT_LISTER)
-        if not os.path.isdir(profile_path_to_check):
-            print(f"Error: Brave profile '{config.BRAVE_PROFILE_TO_USE_EVENT_LISTER}' not found within {brave_user_data_dir}")
-            return None
-
-        options.add_argument(f"user-data-dir={brave_user_data_dir}")
-        options.add_argument(f"profile-directory={config.BRAVE_PROFILE_TO_USE_EVENT_LISTER}")
-        print(f"Attempting to use Brave user data dir: {brave_user_data_dir}")
-        print(f"Attempting to use Brave profile: {config.BRAVE_PROFILE_TO_USE_EVENT_LISTER}")
     except Exception as e:
         print(f"Error setting up Brave profile path: {e}")
-        # Allow running without profile if setup fails, but print warning
         print("Warning: Proceeding without a specific Brave profile due to error.")
         pass
-
 
     if os.path.exists(config.BRAVE_APP_PATH):
         options.binary_location = config.BRAVE_APP_PATH
@@ -63,7 +62,7 @@ def setup_driver_for_event_lister():
 
     try:
         driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
-        driver.set_page_load_timeout(config.PAGE_LOAD_TIMEOUT_EVENT_LISTER)
+        driver.set_page_load_timeout(getattr(config, "PAGE_LOAD_TIMEOUT_EVENT_LISTER", 25))
         return driver
     except Exception as e:
         print(f"Error setting up WebDriver for Brave (event_data.py): {e}")

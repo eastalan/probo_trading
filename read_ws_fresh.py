@@ -3,6 +3,7 @@ import os
 import re # For slugify and class regex
 import datetime # For timestamps and file headers
 import platform # To help determine OS for profile paths
+from log_utils import get_dated_log_path
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service as ChromeService
@@ -16,21 +17,15 @@ import sys
 import subprocess
 
 # --- User Configuration for this Specific Script ---
+BRAVE_BINARY_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" # macOS Chrome
 
-# **IMPORTANT**: This is pre-filled for macOS.
-# If you are on WINDOWS or LINUX, you MUST change this path to your Brave browser executable.
-BRAVE_BINARY_PATH = "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" # macOS
-# Example for Windows:
-# BRAVE_BINARY_PATH = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
-# Example for Linux (find with 'which brave-browser'):
-# BRAVE_BINARY_PATH = "/usr/bin/brave-browser"
-
-FOTMOB_MATCH_URL = "https://www.fotmob.com/en-GB/match/4506589/playbyplay" # Example, change if needed
-POLL_INTERVAL = 0.2 # As per your last script
-INITIAL_PAGE_LOAD_WAIT = 3 # As per your last script
+FOTMOB_MATCH_URL = os.environ.get("FOTMOB_MATCH_URL") or "https://www.fotmob.com/en-GB/match/4830464/playbyplay"
+POLL_INTERVAL = 0.2 
+INITIAL_PAGE_LOAD_WAIT = 3
 HEADLESS_BROWSER = "--headless" in sys.argv or os.environ.get("HEADLESS_BROWSER", "False") == "True" # Set to True if you want to run in headless mode
-LOG_OUTPUT_DIR = "fotmob_opta_event_logs"
 
+# Use consistent dated log directory structure
+LOG_OUTPUT_DIR = "fotmob_opta_event_logs"
 # --- End of User Configuration ---
 
 def slugify_filename(text):
@@ -67,7 +62,45 @@ def setup_brave_driver(brave_exe_path):
     options.add_experimental_option('excludeSwitches', ['enable-logging'])
     options.add_argument("--disable-dev-shm-usage")
     try:
-        driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
+        # Add compatibility options
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-plugins-discovery")
+        options.add_argument("--disable-web-security")
+        options.add_argument("--allow-running-insecure-content")
+        options.add_experimental_option("useAutomationExtension", False)
+        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        
+        # Try to use system ChromeDriver or download fresh one
+        print("Setting up ChromeDriver...")
+        
+        # First try to use system chromedriver if available
+        system_chromedriver = "/usr/local/bin/chromedriver"
+        if os.path.exists(system_chromedriver):
+            print(f"Using system ChromeDriver: {system_chromedriver}")
+            service = ChromeService(executable_path=system_chromedriver)
+        else:
+            # Clear cache and get fresh ChromeDriver
+            print("Downloading fresh ChromeDriver...")
+            try:
+                # Force fresh download
+                chromedriver_path = ChromeDriverManager(cache_valid_range=1).install()
+                print(f"ChromeDriver path: {chromedriver_path}")
+                
+                # Remove quarantine attribute (macOS security)
+                os.system(f"xattr -d com.apple.quarantine '{chromedriver_path}' 2>/dev/null || true")
+                
+                # Make executable
+                import stat
+                os.chmod(chromedriver_path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+                
+                service = ChromeService(executable_path=chromedriver_path)
+            except Exception as e:
+                print(f"ChromeDriver setup failed: {e}")
+                # Fallback to default service
+                service = ChromeService()
+        
+        driver = webdriver.Chrome(service=service, options=options)
         driver.set_page_load_timeout(INITIAL_PAGE_LOAD_WAIT + 10)
         return driver, temp_user_data_dir
     except WebDriverException as e:
@@ -198,13 +231,6 @@ def monitor_fotmob_events():
         print("Failed to initialize Brave WebDriver. Exiting.")
         return
 
-    if not os.path.exists(LOG_OUTPUT_DIR):
-        try:
-            os.makedirs(LOG_OUTPUT_DIR); print(f"Created log directory: {LOG_OUTPUT_DIR}")
-        except OSError as e:
-            print(f"Error creating log directory {LOG_OUTPUT_DIR}: {e}. Exiting.")
-            if driver: driver.quit(); return
-
     # --- Extract team names and date for log filename ---
     print("Loading page to extract team names and date for log filename...")
     try:
@@ -218,7 +244,7 @@ def monitor_fotmob_events():
     team1_slug = slugify_filename(team1)
     team2_slug = slugify_filename(team2)
     log_filename = f"{team1_slug}_{team2_slug}_{match_date}.log"
-    log_filepath = os.path.join(LOG_OUTPUT_DIR, log_filename)
+    log_filepath = get_dated_log_path(LOG_OUTPUT_DIR, log_filename)
     print(f"Logging Opta events to: {log_filepath}")
 
     if not os.path.exists(log_filepath) or os.path.getsize(log_filepath) == 0:
@@ -258,17 +284,14 @@ def monitor_fotmob_events():
             timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
             #pdb.set_trace() # Debugging line to pause execution for inspection
             # --- Live clock checks ---
-            if not live_time_str:
-                print(f"[{timestamp}] Live clock not active. Pausing event polling. Will retry every 10 seconds...")
+            if not live_time_str or live_time_str.strip().lower() in ["half time", "ht"]:
+                print(f"[{timestamp}] Live clock not active or at Half Time. Pausing event polling. Will retry every 10 seconds...")
                 while True:
                     time.sleep(10)
                     _, _, _, live_time_str = get_teams_and_date_from_header(driver)
-                    if live_time_str:
+                    if live_time_str and live_time_str.strip().lower() not in ["half time", "ht", ""]:
                         print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Live clock resumed: {live_time_str}. Resuming event polling.")
                         break
-                    if live_time_str and live_time_str.strip().lower() in ["half time", "ht"]:
-                        time.sleep(POLL_INTERVAL)
-                        return
                     if live_time_str and live_time_str.strip().lower() in ["full time", "ft"]:
                         print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Match ended ({live_time_str}). Terminating program.")
                         return
@@ -313,6 +336,15 @@ def monitor_fotmob_events():
                 if consecutive_not_found_count == 1 or \
                    consecutive_not_found_count % MAX_CONSECUTIVE_NOT_FOUND_BEFORE_CONSOLE_WARNING == 0:
                     print(f"[{timestamp}] Update: {status_msg} (Attempt {consecutive_not_found_count})")
+                # Reload the page if not found 100 times in a row
+                if (consecutive_not_found_count % 100 == 0):
+                    print(f"[{timestamp}] Max consecutive not found ({consecutive_not_found_count}) reached. Reloading page...")
+                    try:
+                        driver.get(FOTMOB_MATCH_URL)
+                        time.sleep(INITIAL_PAGE_LOAD_WAIT)
+                        print(f"[{timestamp}] Page reloaded.")
+                    except Exception as e:
+                        print(f"[{timestamp}] Error reloading page: {e}")
 
             time.sleep(POLL_INTERVAL)
 
@@ -332,6 +364,7 @@ def monitor_fotmob_events():
             except OSError as e:
                 print(f"Error removing temporary profile directory {temp_profile_dir}: {e}")
         print(f"Event logging to {log_filepath} complete.")
+
 
 if __name__ == "__main__":
     if not BRAVE_BINARY_PATH:

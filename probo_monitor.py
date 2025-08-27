@@ -100,9 +100,23 @@ def get_order_book_data_standalone(driver):
     return {"yes": yes_book_list, "no": no_book_list}
 
 
+def is_new_data_different(new_data, last_data):
+    """
+    Compares the new_data dict with last_data dict.
+    Returns True if different, False if same.
+    """
+    if last_data is None:
+        return True
+    # Compare the order_book section only (ignoring timestamp)
+    return new_data.get("order_book") != last_data.get("order_book")
+
+
 def monitor_single_event(driver):
     event_url = config.STANDALONE_EVENT_URL_TO_MONITOR
-    output_dir = config.MARKET_DATA_BASE_DIR
+
+    # --- NEW: Add current date subfolder ---
+    current_date_str = datetime.datetime.now().strftime("%Y%m%d")
+    output_dir = os.path.join(config.MARKET_DATA_BASE_DIR, current_date_str)
 
     event_name_for_header = "Unknown Event"
     try:
@@ -121,9 +135,11 @@ def monitor_single_event(driver):
 
     if not os.path.exists(output_dir):
         try:
-            os.makedirs(output_dir); print(f"Created directory: {output_dir}")
+            os.makedirs(output_dir)
+            print(f"Created directory: {output_dir}")
         except OSError as e:
-            print(f"Error creating dir {output_dir}: {e}. Exiting."); return
+            print(f"Error creating dir {output_dir}: {e}. Exiting.")
+            return
 
     file_exists_and_has_content = os.path.exists(output_filepath) and os.path.getsize(output_filepath) > 0
     file_mode = 'a'
@@ -148,14 +164,15 @@ def monitor_single_event(driver):
         time.sleep(config.STANDALONE_INITIAL_LOAD_SECONDS)
         print("Initial load complete. Starting polling.")
     except Exception as e:
-        print(f"Error loading page {event_url}: {e}"); return
+        print(f"Error loading page {event_url}: {e}")
+        return
 
-    # MODIFICATION: Parse kick-off DATETIME string
     kick_off_datetime_obj = None
     if config.STANDALONE_KICK_OFF_DATETIME_STR:
         try:
-            kick_off_datetime_obj = datetime.datetime.strptime(config.STANDALONE_KICK_OFF_DATETIME_STR,
-                                                               "%Y-%m-%d %H:%M:%S")
+            kick_off_datetime_obj = datetime.datetime.strptime(
+                config.STANDALONE_KICK_OFF_DATETIME_STR, "%Y-%m-%d %H:%M:%S"
+            )
             print(f"Kick-off datetime set to: {kick_off_datetime_obj.strftime('%Y-%m-%d %H:%M:%S')}")
         except ValueError:
             print(
@@ -165,29 +182,43 @@ def monitor_single_event(driver):
     else:
         print("No kick-off datetime specified. Using normal polling interval.")
 
+    last_refresh_time = time.monotonic()
+    REFRESH_INTERVAL_SECONDS = 2.5 * 60  # 4 minutes
+
+    last_dumped_data = None
+
     try:
         while True:
             loop_start_time = time.monotonic()
-            current_dt_obj = datetime.datetime.now()  # This is already a datetime object
+            current_dt_obj = datetime.datetime.now()
             timestamp = current_dt_obj.strftime("%Y-%m-%d %H:%M:%S.%f")
 
+            # Refresh page every 4 minutes
+            if time.monotonic() - last_refresh_time > REFRESH_INTERVAL_SECONDS:
+                print(f"[{timestamp}] Refreshing page after 4 minutes...")
+                try:
+                    driver.refresh()
+                    print(f"[{timestamp}] Page refreshed.")
+                except Exception as e:
+                    print(f"[{timestamp}] Error refreshing page: {e}")
+                last_refresh_time = time.monotonic()
+
             order_book = get_order_book_data_standalone(driver)
-            if order_book["yes"] or order_book["no"]:
-                record = {"timestamp": timestamp, "order_book": order_book}
-                with open(output_filepath, 'a', encoding='utf-8') as f: f.write(json.dumps(record) + "\n")
+            record = {"timestamp": timestamp, "order_book": order_book}
+            if is_new_data_different(record, last_dumped_data):
+                with open(output_filepath, 'a', encoding='utf-8') as f:
+                    f.write(json.dumps(record) + "\n")
+                last_dumped_data = record
 
             current_polling_interval = config.STANDALONE_POLLING_INTERVAL
-            if kick_off_datetime_obj:  # Check if kick_off_datetime_obj was successfully parsed
-                #pdb.set_trace()
-                if current_dt_obj < kick_off_datetime_obj:  # Compare current datetime with kick-off datetime
+            if kick_off_datetime_obj:
+                if current_dt_obj < kick_off_datetime_obj:
                     current_polling_interval = config.STANDALONE_POLLING_INTERVAL * config.STANDALONE_POLLING_INTERVAL_PRE_KICKOFF_FACTOR
-                    # print(f"Pre-kickoff: Slower polling interval = {current_polling_interval:.2f}s")
-                # else: # Optional: print if post-kickoff
-                # print(f"Post-kickoff: Normal polling interval = {current_polling_interval:.2f}s")
 
             proc_time = time.monotonic() - loop_start_time
             sleep_dur = current_polling_interval - proc_time
-            if sleep_dur > 0: time.sleep(sleep_dur)
+            if sleep_dur > 0:
+                time.sleep(sleep_dur)
 
     except KeyboardInterrupt:
         print("\nMonitoring stopped by user.")

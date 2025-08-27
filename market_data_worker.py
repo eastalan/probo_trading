@@ -56,16 +56,7 @@ def setup_worker_driver(assigned_profile_name=None, worker_pid=None):
         print(f"[Worker PID: {effective_pid}] Attempting to use existing Brave profile: '{assigned_profile_name}'")
         try:
             home_directory = os.path.expanduser("~")
-            # This path structure is common for Brave, adjust if yours differs significantly
-            # On Windows, it's usually in %LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data
-            # On Linux, ~/.config/BraveSoftware/Brave-Browser/
-            # On macOS, ~/Library/Application Support/BraveSoftware/Brave-Browser/
-            if "Windows" in os.uname().sysname: # A bit simplistic, platform module is better
-                 brave_user_data_dir_base = os.path.join(home_directory, "AppData", "Local", "BraveSoftware")
-            elif "Linux" in os.uname().sysname:
-                 brave_user_data_dir_base = os.path.join(home_directory, ".config", "BraveSoftware")
-            else: # macOS default
-                 brave_user_data_dir_base = os.path.join(home_directory, "Library/Application Support/BraveSoftware")
+            brave_user_data_dir_base = os.path.join(home_directory, "Library/Application Support/BraveSoftware")
 
             brave_user_data_dir = os.path.join(brave_user_data_dir_base, "Brave-Browser")
 
@@ -192,6 +183,27 @@ def get_order_book_side_data_worker(driver, prices_xpath, quantities_xpath, side
         return None # Indicates a generic error
 
 
+def is_new_data_different_worker(new_data, last_data):
+    """
+    Compares the new_data dict with last_data dict.
+    Returns True if different, False if same.
+    Only compares the 'order_book' section.
+    """
+    if last_data is None:
+        return True
+    return new_data.get("order_book") != last_data.get("order_book")
+
+def write_if_new_data(record, last_dumped_data, output_filepath):
+    """
+    Writes record to file only if it is different from last_dumped_data.
+    Returns the new last_dumped_data (either updated or unchanged).
+    """
+    if is_new_data_different_worker(record, last_dumped_data):
+        with open(output_filepath, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(record) + "\n")
+        return record
+    return last_dumped_data
+
 def record_market_data_for_event(event_name, event_url, trading_started_on, event_expires_on,
                                  profile_request_info):
     worker_pid = os.getpid()
@@ -212,18 +224,20 @@ def record_market_data_for_event(event_name, event_url, trading_started_on, even
         url_parts = event_url.split('/')
         event_slug = slugify(url_parts[-1] if url_parts[-1] else (url_parts[-2] if len(url_parts) > 1 else f"event_{worker_pid}"))
 
+    # --- NEW: Add current date subfolder ---
+    current_date_str = datetime.datetime.now().strftime("%Y%m%d")
+    dated_output_dir = os.path.join(config.MARKET_DATA_BASE_DIR, current_date_str)
     output_filename = f"{event_slug}_market_data.jsonl"
-    output_filepath = os.path.join(config.MARKET_DATA_BASE_DIR, output_filename)
+    output_filepath = os.path.join(dated_output_dir, output_filename)
 
     try:
-        if not os.path.exists(config.MARKET_DATA_BASE_DIR):
-            os.makedirs(config.MARKET_DATA_BASE_DIR)
+        if not os.path.exists(dated_output_dir):
+            os.makedirs(dated_output_dir)
     except OSError as e:
-        print(f"[Worker PID: {worker_pid}] CRITICAL: Error creating dir {config.MARKET_DATA_BASE_DIR}: {e}. Exiting.")
+        print(f"[Worker PID: {worker_pid}] CRITICAL: Error creating dir {dated_output_dir}: {e}. Exiting.")
         driver.quit(); cleanup_temp_profile_dir(temp_profile_path, worker_pid); return
 
     file_mode = 'a' if os.path.exists(output_filepath) and os.path.getsize(output_filepath) > 0 else 'w'
-    # print(f"[Worker PID: {worker_pid}] File mode for {output_filepath}: {file_mode}") # Less verbose
 
     try:
         with open(output_filepath, file_mode, encoding='utf-8') as f:
@@ -235,13 +249,12 @@ def record_market_data_for_event(event_name, event_url, trading_started_on, even
         driver.quit(); cleanup_temp_profile_dir(temp_profile_path, worker_pid); return
 
     page_loaded_successfully = False
-    for attempt in range(3): # Max 3 load attempts
+    for attempt in range(3):
         try:
             print(f"[Worker PID: {worker_pid}] Navigating to event page: {event_url} (Attempt {attempt + 1})")
             driver.get(event_url)
-            # Basic check for page title or a known static element after get()
             WebDriverWait(driver, config.INITIAL_PAGE_LOAD_WAIT_SECONDS_WORKER).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body")) # Wait for body to be present
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
             page_loaded_successfully = True
             print(f"[Worker PID: {worker_pid}] Page navigation complete for '{event_name}'.")
@@ -257,57 +270,18 @@ def record_market_data_for_event(event_name, event_url, trading_started_on, even
 
     if not page_loaded_successfully:
         print(f"[Worker PID: {worker_pid}] Failed to load page '{event_name}' after multiple attempts. Exiting.")
-        # driver.quit() and cleanup_temp_profile_dir already called in loop if failed
         return
-
-    # --- NEW: LOGIN/SIGNUP OVERLAY CHECK ---
-    if config.CHECK_FOR_LOGIN_OVERLAY and config.XPATH_LOGIN_SIGNUP_OVERLAY:
-        print(f"[Worker PID: {worker_pid}] Checking for login/signup overlay (max {config.WAIT_FOR_LOGIN_OVERLAY_SECONDS}s)...")
-        overlay_disappeared = False
-        try:
-            # Determine which element to wait for invisibility
-            xpath_to_wait_for = config.XPATH_LOGIN_SIGNUP_OVERLAY
-
-            # First, quickly check if the overlay (or its blocking element) is even there and displayed
-            # Use a very short timeout for this initial check to avoid waiting if it's not there
-            initial_check_wait = WebDriverWait(driver, 3) # 3 seconds for initial check
-            try:
-                overlay_element = initial_check_wait.until(EC.presence_of_element_located((By.XPATH, xpath_to_wait_for)))
-                if overlay_element and overlay_element.is_displayed():
-                    print(f"[Worker PID: {worker_pid}] Login/signup element '{xpath_to_wait_for}' detected and visible. Waiting for it to disappear...")
-                    # Now wait for the longer duration for it to become invisible
-                    WebDriverWait(driver, config.WAIT_FOR_LOGIN_OVERLAY_SECONDS).until(
-                        EC.invisibility_of_element_located((By.XPATH, xpath_to_wait_for))
-                    )
-                    overlay_disappeared = True
-                    print(f"[Worker PID: {worker_pid}] Login/signup element disappeared.")
-                else:
-                    # Element present but not displayed, or check timed out (meaning not obviously present)
-                    overlay_disappeared = True # Treat as if it's not an issue
-                    print(f"[Worker PID: {worker_pid}] Login/signup element not initially visible or not found quickly. Proceeding.")
-            except TimeoutException:
-                # This means the element was not found/visible within the short initial_check_wait
-                overlay_disappeared = True # Treat as if it's not an issue
-                print(f"[Worker PID: {worker_pid}] Login/signup element not detected initially. Proceeding.")
-
-        except TimeoutException: # This catches timeout from the main WebDriverWait for invisibility
-            print(f"[Worker PID: {worker_pid}] WARNING: Login/signup element '{xpath_to_wait_for}' did NOT disappear within {config.WAIT_FOR_LOGIN_OVERLAY_SECONDS}s for '{event_name}'. Polling will proceed but may be affected.")
-        except Exception as e_overlay:
-            print(f"[Worker PID: {worker_pid}] WARNING: An error occurred while checking for login/signup overlay for '{event_name}': {e_overlay}. Proceeding.")
-
-        if not overlay_disappeared and not (config.XPATH_LOGIN_BLOCKING_ELEMENT and not driver.find_elements(By.XPATH, config.XPATH_LOGIN_BLOCKING_ELEMENT)): # Double check if it timed out but element is gone
-             print(f"[Worker PID: {worker_pid}] Overlay check indicated potential issue, but proceeding to poll data for '{event_name}'.")
-    # --- END: LOGIN/SIGNUP OVERLAY CHECK ---
 
     print(f"[Worker PID: {worker_pid}] Page '{event_name}' ready. Starting data polling loop.")
     consecutive_fetch_errors = 0
-    max_consecutive_fetch_errors = 10
+    max_consecutive_fetch_errors = 100
+
+    last_dumped_data = None
 
     try:
-        last_refresh_time = time.monotonic()  # Track last refresh for page
+        last_refresh_time = time.monotonic()
         while True:
             loop_start_time = time.monotonic()
-            # Format timestamp as "YYYY-MM-DD HH:MM:SS.ssssss" (no 'T')
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
             try:
                 _ = driver.title
@@ -317,24 +291,23 @@ def record_market_data_for_event(event_name, event_url, trading_started_on, even
 
             yes_book = get_order_book_side_data_worker(driver, config.XPATH_YES_ALL_PRICES, config.XPATH_YES_ALL_QTYS, "YES", worker_pid)
             no_book = get_order_book_side_data_worker(driver, config.XPATH_NO_ALL_PRICES, config.XPATH_NO_ALL_QTYS, "NO", worker_pid)
-            record = {"timestamp": timestamp, "event_name": event_name, "order_book": {}}
+            record = {"timestamp": timestamp, "order_book": {}}
             data_fetched_this_cycle = False
 
-            if yes_book is not None: record["order_book"]["yes"] = yes_book; data_fetched_this_cycle = True if yes_book else data_fetched_this_cycle
-            else: record["order_book"]["yes_error"] = "FetchError"
-            if no_book is not None: record["order_book"]["no"] = no_book; data_fetched_this_cycle = True if no_book else data_fetched_this_cycle
-            else: record["order_book"]["no_error"] = "FetchError"
-
-            if data_fetched_this_cycle or "FetchError" in str(record["order_book"]):
-                try:
-                    with open(output_filepath, 'a', encoding='utf-8') as f: f.write(json.dumps(record) + "\n")
-                    consecutive_fetch_errors = 0
-                except Exception as e_write:
-                    print(f"[Worker PID: {worker_pid}] Error writing data to {output_filepath}: {e_write}"); consecutive_fetch_errors += 1
+            if yes_book is not None:
+                record["order_book"]["yes"] = yes_book
+                data_fetched_this_cycle = True if yes_book else data_fetched_this_cycle
             else:
-                consecutive_fetch_errors += 1
+                record["order_book"]["yes_error"] = "FetchError"
+            if no_book is not None:
+                record["order_book"]["no"] = no_book
+                data_fetched_this_cycle = True if no_book else data_fetched_this_cycle
+            else:
+                record["order_book"]["no_error"] = "FetchError"
 
-            # --- Refresh the page every 4 minutes (240 seconds) ---
+            # Only write if new data is different
+            last_dumped_data = write_if_new_data(record, last_dumped_data, output_filepath)
+
             if time.monotonic() - last_refresh_time >= 240:
                 print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [Worker PID: {worker_pid}] Refreshing page to keep data fresh...")
                 try:
@@ -343,6 +316,11 @@ def record_market_data_for_event(event_name, event_url, trading_started_on, even
                 except Exception as e:
                     print(f"[Worker PID: {worker_pid}] Error refreshing page: {e}")
                 last_refresh_time = time.monotonic()
+
+            if data_fetched_this_cycle:
+                consecutive_fetch_errors = 0
+            else:
+                consecutive_fetch_errors += 1
 
             if consecutive_fetch_errors >= max_consecutive_fetch_errors:
                 print(f"[Worker PID: {worker_pid}] Max ({max_consecutive_fetch_errors}) consecutive fetch errors for '{event_name}'. Stopping worker.")
@@ -359,7 +337,7 @@ def record_market_data_for_event(event_name, event_url, trading_started_on, even
         print(f"[Worker PID: {worker_pid}] Stopping worker for '{event_name}'.")
         if driver:
             try: driver.quit()
-            except Exception: pass # ignore errors during quit
+            except Exception: pass
         if temp_profile_path: cleanup_temp_profile_dir(temp_profile_path, worker_pid)
         print(f"[Worker PID: {worker_pid}] Worker for '{event_name}' finished.")
 
