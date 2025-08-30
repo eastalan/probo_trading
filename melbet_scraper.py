@@ -244,7 +244,7 @@ def scrape_1x2_api_all_leagues():
     logger = logging.getLogger(__name__)
     matches = []
     
-    api_url = "https://1xbethind.com/service-api/LiveFeed/GetSportsShortZip?sports=1&lng=en&gr=413&country=71&partner=71&virtualSports=true&groupChamps=true"
+    api_url = "https://melbet-india.net/service-api/LiveFeed/Get1x2_VZip?sports=1&count=40&lng=en&gr=1182&mode=4&country=71&partner=8&getEmpty=true&virtualSports=true&noFilterBlockEvent=true"
     
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36',

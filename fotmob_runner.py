@@ -106,8 +106,12 @@ def process_match_uuid_and_socket(match_data, df, running_workers, temp_files):
         # Only spawn socket if we have a valid UUID and not already running
         if event_uuid and not already_running(match_id, running_workers):
             try:
+                # Create temp directory for socket files
+                temp_dir = os.path.join(os.path.dirname(__file__), "temp_sockets")
+                os.makedirs(temp_dir, exist_ok=True)
+                
                 # Create a modified version of fotmob_socket.py for this match
-                temp_socket_file = os.path.join(os.path.dirname(__file__), f"fotmob_socket_{match_id}.py")
+                temp_socket_file = os.path.join(temp_dir, f"fotmob_socket_{match_id}.py")
                 
                 # Read the original fotmob_socket.py
                 with open(FOTMOB_SOCKET_SCRIPT, 'r') as f:
@@ -125,14 +129,21 @@ def process_match_uuid_and_socket(match_data, df, running_workers, temp_files):
                     modified_content
                 )
                 
+                # Fix import path for log_utils since we're in temp_sockets subdirectory
+                modified_content = modified_content.replace(
+                    'from log_utils import get_dated_log_path',
+                    'import sys\nimport os\nsys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))\nfrom log_utils import get_dated_log_path'
+                )
+                
                 # Write the modified script to the main directory
                 with open(temp_socket_file, 'w') as f:
                     f.write(modified_content)
                 
-                temp_files.add(os.path.basename(temp_socket_file))
+                temp_files.add(temp_socket_file)
                 
                 # Launch the modified socket script
                 proc = subprocess.Popen(["python3", temp_socket_file])
+                proc.start_time = time.time()  # Track start time for cleanup
                 running_workers[match_id] = proc
                 print(f"Launched fotmob_socket for match {match_id} with EVENT_UUID: {event_uuid}")
                 
@@ -166,10 +177,24 @@ def cleanup_temp_files():
     Clean up temporary socket files.
     """
     try:
+        # Clean up files in main directory (legacy)
         for file in os.listdir('.'):
             if file.startswith('fotmob_socket_') and file.endswith('.py'):
                 os.remove(file)
                 print(f"Cleaned up temporary file: {file}")
+        
+        # Clean up files in temp_sockets directory
+        temp_dir = "temp_sockets"
+        if os.path.exists(temp_dir):
+            for file in os.listdir(temp_dir):
+                if file.startswith('fotmob_socket_') and file.endswith('.py'):
+                    os.remove(os.path.join(temp_dir, file))
+                    print(f"Cleaned up temporary file: {os.path.join(temp_dir, file)}")
+            # Remove empty directory
+            try:
+                os.rmdir(temp_dir)
+            except OSError:
+                pass  # Directory not empty, that's fine
     except Exception as e:
         print(f"Error cleaning up temp files: {e}")
 
@@ -249,7 +274,7 @@ def main():
         for mid in finished:
             print(f"Worker for match {mid} finished.")
             # Clean up the temporary socket file for this match
-            temp_file = f"fotmob_socket_{mid}.py"
+            temp_file = os.path.join("temp_sockets", f"fotmob_socket_{mid}.py")
             if temp_file in temp_files:
                 try:
                     os.remove(temp_file)
@@ -258,6 +283,42 @@ def main():
                 except Exception as e:
                     print(f"Error cleaning up {temp_file}: {e}")
             del running_workers[mid]
+        
+        # Kill inactive sockets (no data for >30 minutes)
+        current_time = time.time()
+        inactive_workers = []
+        for mid, proc in running_workers.items():
+            if proc.poll() is None:  # Still running
+                # Check if log file has recent activity
+                log_file = os.path.join("logs", "fotmob_data", now.strftime("%Y-%m-%d"), f"{mid}.log")
+                if os.path.exists(log_file):
+                    file_mod_time = os.path.getmtime(log_file)
+                    if current_time - file_mod_time > 1200:  # 30 minutes
+                        print(f"Killing inactive socket for match {mid} (no data for >30 min)")
+                        proc.terminate()
+                        inactive_workers.append(mid)
+                else:
+                    # No log file means no data received - kill after 10 minutes
+                    if hasattr(proc, 'start_time'):
+                        if current_time - proc.start_time > 600:  # 10 minutes
+                            print(f"Killing socket for match {mid} (no log file created)")
+                            proc.terminate()
+                            inactive_workers.append(mid)
+                    else:
+                        proc.start_time = current_time
+        
+        # Clean up inactive workers
+        for mid in inactive_workers:
+            temp_file = os.path.join("temp_sockets", f"fotmob_socket_{mid}.py")
+            if temp_file in temp_files:
+                try:
+                    os.remove(temp_file)
+                    temp_files.remove(temp_file)
+                    print(f"Cleaned up temp file for inactive worker: {temp_file}")
+                except Exception as e:
+                    print(f"Error cleaning up {temp_file}: {e}")
+            if mid in running_workers:
+                del running_workers[mid]
 
         # Write back the updated DataFrame (only if not already written during UUID extraction)
         df.to_csv(FOTMOB_MATCHES_FILE, sep="|", index=False)

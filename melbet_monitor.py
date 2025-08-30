@@ -75,7 +75,14 @@ def discover_live_matches():
         "France. Ligue 1",
         "Champions League",
         "Europa League",
-        "USA. MLS"
+        "USA. MLS",
+        "Japan. J-League",
+        "Argentina. Primera Division",
+        "Turkey. SuperLiga",
+        "Austria. Bundesliga",
+        "Netherlands. Eredivisie",
+        "Portugal. Liga Portugal",
+        "Brazil. Campeonato Brasileiro. Serie A"
     ]
     
     data = fetch_1x2_data()
@@ -122,13 +129,9 @@ def discover_live_matches():
                 if not all([match_id, team1, team2]):
                     continue
                 
-                # Filter by target leagues
-                league_l = league.lower()
-                # Special-case MLS: include only exact 'USA. MLS' and exclude 'USA. MLS Next Pro'
-                if 'usa. mls' in league_l:
-                    league_match = (league_l.strip() == 'usa. mls')
-                else:
-                    league_match = any(target.lower() in league_l for target in target_leagues)
+                # Filter by target leagues - EXACT MATCHES ONLY
+                league_l = league.lower().strip()
+                league_match = any(target.lower() == league_l for target in target_leagues)
                 
                 if league_match:
                     match_info = {
@@ -234,7 +237,7 @@ def fetch_1x2_data():
         return None
 
 def extract_c_values_for_match(data, match_id):
-    """Extract C values for a specific match from 1X2 API response"""
+    """Extract C values with blocked status indicators from 1X2 API response"""
     logger = logging.getLogger(__name__)
     
     if not data or not data.get('Success') or 'Value' not in data:
@@ -243,12 +246,17 @@ def extract_c_values_for_match(data, match_id):
     try:
         for match in data['Value']:
             if str(match.get('I', '')) == str(match_id):
-                # Extract odds in old format (T1_C, T2_C, etc.)
+                # Extract odds with blocked indicators
                 c_values = {}
                 for i, event in enumerate(match.get('E', []), 1):
                     coefficient = event.get('C', 0)
                     if coefficient:
-                        c_values[f'T{i}_C'] = coefficient
+                        # Check if bet is blocked (B: true)
+                        is_blocked = event.get('B', False)
+                        if is_blocked:
+                            c_values[f'T{i}_C'] = f"{coefficient}" + "-L"
+                        else:
+                            c_values[f'T{i}_C'] = coefficient
 
                 return c_values
                     
@@ -258,19 +266,16 @@ def extract_c_values_for_match(data, match_id):
     return {}
 
 def log_c_values(match_info, c_values, previous_c_values):
-    """Log C values to the match-specific log file"""
+    """Log C values with lock indicators for blocked bets"""
     logger = logging.getLogger(__name__)
-    
-    if not c_values:
-        return previous_c_values
     
     try:
         # Create log filename based on team names
         log_filename = f"{match_info['filename']}.log"
         log_path = get_dated_log_path('melbet_data', log_filename)
         
-        # Check if C values have changed
-        if c_values != previous_c_values:
+        # Only log if C values exist and have changed
+        if c_values and (c_values != previous_c_values or not previous_c_values):
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
             with open(log_path, 'a', encoding='utf-8') as f:
@@ -320,20 +325,19 @@ def monitor_matches_continuously(poll_interval=0.3, psv_file='event_data/melbet_
                 data = fetch_1x2_data()
                 if data:
                     for match_id, event in live_matches.items():
-                        # Extract C values for this specific match
+                        # Extract C values with blocked indicators for this specific match
                         c_values = extract_c_values_for_match(data, match_id)
                         
-                        if c_values:
-                            # Initialize if not exists
-                            if match_id not in previous_c_values:
-                                previous_c_values[match_id] = {}
-                            
-                            # Log C values if they've changed
-                            previous_c_values[match_id] = log_c_values(
-                                event, 
-                                c_values, 
-                                previous_c_values[match_id]
-                            )
+                        # Initialize if not exists
+                        if match_id not in previous_c_values:
+                            previous_c_values[match_id] = {}
+                        
+                        # Log C values with lock indicators (always log, even if no odds)
+                        previous_c_values[match_id] = log_c_values(
+                            event, 
+                            c_values, 
+                            previous_c_values[match_id]
+                        )
                 
                 # Print status every 100 cycles
                 if cycle_count % 100 == 0:

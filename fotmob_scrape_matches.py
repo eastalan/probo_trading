@@ -19,7 +19,14 @@ TARGET_LEAGUES = [
     "Italy - Serie A",
     "France - Ligue 1",
     "Japan - J. League",
-    "United States - Major League Soccer"
+    "United States - Major League Soccer",
+    "Argentina - Liga Profesional Clausura",
+    "Austria - Bundesliga",
+    "Brazil - Serie A",
+    "Egypt - Premier League",
+    'Türkiye - 1. Lig',
+    'Netherlands - Eredivisie',
+    'Portugal - Liga Portugal'
 ]
 OUTPUT_DIRECTORY = os.path.join("data", "event_data")
 OUTPUT_FILE_NAME = "fotmob_matches.psv"

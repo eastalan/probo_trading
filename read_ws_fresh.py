@@ -19,7 +19,7 @@ import subprocess
 # --- User Configuration for this Specific Script ---
 BRAVE_BINARY_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" # macOS Chrome
 
-FOTMOB_MATCH_URL = os.environ.get("FOTMOB_MATCH_URL") or "https://www.fotmob.com/en-GB/match/4830464/playbyplay"
+FOTMOB_MATCH_URL = os.environ.get("FOTMOB_MATCH_URL") or "https://www.fotmob.com/en-GB/match/4813398/playbyplay"
 POLL_INTERVAL = 0.2 
 INITIAL_PAGE_LOAD_WAIT = 3
 HEADLESS_BROWSER = "--headless" in sys.argv or os.environ.get("HEADLESS_BROWSER", "False") == "True" # Set to True if you want to run in headless mode
