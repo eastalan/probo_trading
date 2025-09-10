@@ -81,9 +81,20 @@ def discover_live_matches():
         "Turkey. SuperLiga",
         "Austria. Bundesliga",
         "Netherlands. Eredivisie",
-        "Portugal. Liga Portugal",
-        "Brazil. Campeonato Brasileiro. Serie A"
-    ]
+        "Portugal. Primeira Liga",
+        "Brazil. Campeonato Brasileiro. Serie A",
+        "Russia. Premier League",
+        "Scotland. Premier League",
+        "China. Super League",
+        "Denmark. Superliga",
+        "Sweden. Allsvenskan",
+        "Norway. Eliteserien",
+        "World Cup 2026 Qualification. Europe",
+        "Friendlies. National Teams",
+        "Germany. Bundesliga. Women",
+        "Spain. Segunda Division",
+        "World Cup 2026 Qualification. CONCACAF"   
+]
     
     data = fetch_1x2_data()
     matches = {}
@@ -248,15 +259,16 @@ def extract_c_values_for_match(data, match_id):
             if str(match.get('I', '')) == str(match_id):
                 # Extract odds with blocked indicators
                 c_values = {}
-                for i, event in enumerate(match.get('E', []), 1):
+                for event in match.get('E', []):
                     coefficient = event.get('C', 0)
-                    if coefficient:
+                    t_value = event.get('T', 0)  # Get actual T value from API
+                    if coefficient and t_value:
                         # Check if bet is blocked (B: true)
                         is_blocked = event.get('B', False)
                         if is_blocked:
-                            c_values[f'T{i}_C'] = f"{coefficient}" + "-L"
+                            c_values[f'T{t_value}_C'] = f"{coefficient}" + "-L"
                         else:
-                            c_values[f'T{i}_C'] = coefficient
+                            c_values[f'T{t_value}_C'] = coefficient
 
                 return c_values
                     

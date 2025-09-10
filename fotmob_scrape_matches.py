@@ -26,7 +26,17 @@ TARGET_LEAGUES = [
     "Egypt - Premier League",
     'Türkiye - 1. Lig',
     'Netherlands - Eredivisie',
-    'Portugal - Liga Portugal'
+    'Portugal - Liga Portugal',
+    'China - Super League',
+    'Russia - Premier League',
+    'Scotland - Premiership',
+    'Denmark - Superligaen',
+    "Sweden - Allsvenskan",
+    "World Cup Qualification UEFA",
+    "Germany - Frauen-Bundesliga",
+    "Spain - LaLiga2",
+    "World Cup Qualification CONCACAF",
+    "World Cup Qualification CONMEBOL"
 ]
 OUTPUT_DIRECTORY = os.path.join("data", "event_data")
 OUTPUT_FILE_NAME = "fotmob_matches.psv"

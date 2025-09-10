@@ -229,10 +229,10 @@ def main():
                 print(f"Resetting match {row['MatchID']} with invalid UUID for reprocessing")
                 df.loc[idx, 'DownloadFlag'] = '0'
         
-        # Get matches that need processing: started, not downloaded, not ended
+        # Get matches that need processing: not ended, with DownloadFlag 0 or 1
         processable_matches = today_matches[
             (today_matches['HasEnded'] != '1') & 
-            (today_matches['DownloadFlag'] == '0')
+            ((today_matches['DownloadFlag'] == '0') | (today_matches['DownloadFlag'] == '1'))
         ]
         
         # Process matches in parallel for UUID extraction and socket spawning

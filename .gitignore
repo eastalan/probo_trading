@@ -1,4 +1,5 @@
 data/
+temp_sockets/
 event_data/
 logs/
 fotmob_opt_event_logs/
