@@ -184,7 +184,9 @@ def extract_matches_from_1x2_response(data, logger):
         "Germany. Bundesliga. Women",
         "Spain. Segunda Division",
         "World Cup 2026 Qualification. CONCACAF",
-        "World Cup 2026. Qualification. South America"   
+        "World Cup 2026. Qualification. South America",
+        "Premier League International Cup"
+  
 ]
     
     try:
