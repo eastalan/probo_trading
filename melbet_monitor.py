@@ -93,13 +93,7 @@ def discover_live_matches():
         "Friendlies. National Teams",
         "Germany. Bundesliga. Women",
         "Spain. Segunda Division",
-        "World Cup 2026 Qualification. CONCACAF",
-        "Premier League International Cup",
-        "England. Championship",
-        "Italy. Serie B",
-        "Germany. 2. Bundesliga",
-        "France. Ligue 2",
-        "Germany. 2. Bundesliga"
+        "World Cup 2026 Qualification. CONCACAF"   
 ]
     
     data = fetch_1x2_data()

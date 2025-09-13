@@ -16,9 +16,11 @@ requests==2.32.5
 selenium==4.35.0
 sniffio==1.3.1
 sortedcontainers==2.4.0
+trio==0.30.0
+trio-websocket==0.12.2
+typing_extensions==4.14.1
+tzdata==2025.2
+urllib3==2.5.0
+webdriver-manager==4.0.2
+websocket-client==1.8.0
 wsproto==1.2.0
-websocket-client
-beautifulsoup4
-lxml
-PyMySQL
-cryptography

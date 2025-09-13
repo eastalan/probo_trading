@@ -1,3 +1,0 @@
-[2025-08-15 23:08:07.691] WELCOME: {"welcome":{"client":{"id":"44c55817-63b6-40fd-8535-78d9ed27177d","ip":"54d","timestamp":"2025-08-15T17:38:07.730Z"}}}
-[2025-08-15 23:08:08.198] UNKNOWN: {"outlet":{"msg":"is_authorised"}}
-[2025-08-15 23:08:08.505] CSB: {"csb":{"rc":0,"msg":"init ok"}}

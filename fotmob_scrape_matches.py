@@ -36,11 +36,7 @@ TARGET_LEAGUES = [
     "Germany - Frauen-Bundesliga",
     "Spain - LaLiga2",
     "World Cup Qualification CONCACAF",
-    "World Cup Qualification CONMEBOL",
-    "France - Ligue 2",
-    "Germany - 2. Bundesliga",
-    "Italy - Serie B",
-    "England - Championship"
+    "World Cup Qualification CONMEBOL"
 ]
 OUTPUT_DIRECTORY = os.path.join("data", "event_data")
 OUTPUT_FILE_NAME = "fotmob_matches.psv"
