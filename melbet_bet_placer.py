@@ -3,7 +3,7 @@ import json
 import time
 import datetime
 import logging
-from log_utils import get_dated_log_path
+from utils.core.log_utils import get_dated_log_path
 
 class MelbetBetPlacer:
     def __init__(self):

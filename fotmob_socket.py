@@ -5,7 +5,7 @@ import time
 import os
 import datetime
 import pandas as pd
-from log_utils import get_dated_log_path
+from utils.core.log_utils import get_dated_log_path
 
 # Configuration
 EVENT_UUID = "5pp18hcr9ery2hv17q7q6eqc"#"10jpwd1x2paywtbfatjev182c"  # Example event UUID

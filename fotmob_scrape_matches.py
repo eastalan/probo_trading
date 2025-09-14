@@ -2,48 +2,25 @@ import os
 import re
 import time
 import datetime
+import uuid as uuid_lib
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
+from utils.db.config_loader import get_db_config, get_db_connection, get_fotmob_config, get_app_config
+
+# Load configuration
+fotmob_config = get_fotmob_config()
+app_config = get_app_config()
 
 # --- Configuration ---
-FOTMOB_BASE_URL = "https://www.fotmob.com/"
+FOTMOB_BASE_URL = fotmob_config['base_url']
 TARGET_DATE_STR = datetime.date.today().strftime("%Y%m%d")
-TARGET_LEAGUES = [
-    "England - Premier League",
-    "Spain - LaLiga",
-    "Germany - Bundesliga",
-    "Italy - Serie A",
-    "France - Ligue 1",
-    "Japan - J. League",
-    "United States - Major League Soccer",
-    "Argentina - Liga Profesional Clausura",
-    "Austria - Bundesliga",
-    "Brazil - Serie A",
-    "Egypt - Premier League",
-    'Türkiye - 1. Lig',
-    'Netherlands - Eredivisie',
-    'Portugal - Liga Portugal',
-    'China - Super League',
-    'Russia - Premier League',
-    'Scotland - Premiership',
-    'Denmark - Superligaen',
-    "Sweden - Allsvenskan",
-    "World Cup Qualification UEFA",
-    "Germany - Frauen-Bundesliga",
-    "Spain - LaLiga2",
-    "World Cup Qualification CONCACAF",
-    "World Cup Qualification CONMEBOL"
-]
-OUTPUT_DIRECTORY = os.path.join("data", "event_data")
-OUTPUT_FILE_NAME = "fotmob_matches.psv"
-OUTPUT_FILE_PATH = os.path.join(OUTPUT_DIRECTORY, OUTPUT_FILE_NAME)
-DELIMITER = "|"
-BRAVE_APP_PATH = "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
-HEADLESS_MODE = True
+TARGET_LEAGUES = fotmob_config['target_leagues']
+BRAVE_APP_PATH = app_config['browser_path']
+HEADLESS_MODE = app_config['headless_mode']
 
 def setup_driver():
     options = Options()
@@ -51,29 +28,34 @@ def setup_driver():
         options.add_argument("--headless=new")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1366x768")
     options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36")
     options.add_experimental_option('excludeSwitches', ['enable-logging'])
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-popup-blocking")
-    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-web-security")
     options.add_argument("--allow-running-insecure-content")
     options.add_argument("--ignore-certificate-errors")
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("useAutomationExtension", False)
+    # macOS specific options
+    options.add_argument("--disable-features=VizDisplayCompositor")
+    options.add_argument("--remote-debugging-port=0")
     
     # Try different approaches to find a compatible driver
     attempts = [
-        # First try: Use system Chrome without specifying binary
-        {"use_brave": False, "driver_version": None},
+        # First try: Use system Chrome with manual driver path
+        {"use_brave": False, "use_system_driver": True},
         # Second try: Use Brave browser if available
-        {"use_brave": True, "driver_version": None},
-        # Third try: Force latest driver with system Chrome
-        {"use_brave": False, "driver_version": "latest"},
+        {"use_brave": True, "use_system_driver": False},
+        # Third try: Use webdriver-manager with older version
+        {"use_brave": False, "use_system_driver": False, "force_version": "139.0.7258.154"},
+        # Fourth try: Use system Chrome without webdriver-manager
+        {"use_brave": False, "use_system_driver": False},
     ]
     
-    for attempt in attempts:
+    for i, attempt in enumerate(attempts, 1):
         try:
             options_copy = Options()
             # Copy all arguments
@@ -82,23 +64,58 @@ def setup_driver():
             for key, value in options.experimental_options.items():
                 options_copy.add_experimental_option(key, value)
                 
-            if attempt["use_brave"] and os.path.exists(BRAVE_APP_PATH):
+            if attempt.get("use_brave") and os.path.exists(BRAVE_APP_PATH):
                 options_copy.binary_location = BRAVE_APP_PATH
-                print("Trying with Brave browser...")
+                print(f"Attempt {i}: Trying with Brave browser...")
             else:
-                print("Trying with system Chrome...")
+                print(f"Attempt {i}: Trying with system Chrome...")
             
-            service = ChromeService(ChromeDriverManager().install())
+            # Try different service approaches
+            if attempt.get("use_system_driver"):
+                # Try to use system chromedriver if available
+                system_paths = [
+                    "/usr/local/bin/chromedriver",
+                    "/opt/homebrew/bin/chromedriver",
+                    "/usr/bin/chromedriver"
+                ]
+                service = None
+                for path in system_paths:
+                    if os.path.exists(path) and os.access(path, os.X_OK):
+                        print(f"Using system chromedriver at: {path}")
+                        service = ChromeService(executable_path=path)
+                        break
+                if not service:
+                    print("No system chromedriver found, falling back to webdriver-manager")
+                    service = ChromeService(ChromeDriverManager().install())
+            elif attempt.get("force_version"):
+                # Try specific version
+                version = attempt["force_version"]
+                print(f"Forcing ChromeDriver version: {version}")
+                service = ChromeService(ChromeDriverManager(version=version).install())
+            else:
+                # Use webdriver-manager default
+                service = ChromeService(ChromeDriverManager().install())
+            
             driver = webdriver.Chrome(service=service, options=options_copy)
             driver.set_page_load_timeout(45)
             print("WebDriver setup successful!")
             return driver
             
         except Exception as e:
-            print(f"Attempt failed: {e}")
+            print(f"Attempt {i} failed: {e}")
+            # Clean up any partial driver instances
+            try:
+                if 'driver' in locals():
+                    driver.quit()
+            except:
+                pass
             continue
     
     print("All WebDriver setup attempts failed.")
+    print("\nTroubleshooting suggestions:")
+    print("1. Install ChromeDriver manually: brew install chromedriver")
+    print("2. Allow ChromeDriver in macOS Security & Privacy settings")
+    print("3. Try running: xattr -d com.apple.quarantine /path/to/chromedriver")
     return None
 
 def extract_match_id_from_url(url_str):
@@ -157,44 +174,76 @@ def get_has_ended_status(status_text):
         return "1"
     return "0"
 
-def get_existing_match_ids(file_path):
-    """Read existing match IDs from the PSV file to avoid duplicates"""
+def get_existing_match_ids():
+    """Read existing match IDs from the database to avoid duplicates"""
     existing_ids = set()
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                for line_num, line in enumerate(f, 1):
-                    line = line.strip()
-                    if line and not line.startswith("MatchDate"):  # Skip header
-                        parts = line.split(DELIMITER)
-                        if len(parts) >= 7:  # Ensure we have enough columns including MatchID
-                            match_id = parts[6].strip()  # MatchID is at index 6
-                            if match_id and match_id != "N/A":
-                                existing_ids.add(match_id)
-        except Exception as e:
-            print(f"Error reading existing match IDs: {e}")
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT match_id FROM fotmob_events WHERE match_id IS NOT NULL")
+            results = cursor.fetchall()
+            for row in results:
+                if row['match_id']:
+                    existing_ids.add(row['match_id'])
+        connection.close()
+        print(f"📊 Found {len(existing_ids)} existing match IDs in database")
+    except Exception as e:
+        print(f"Error reading existing match IDs from database: {e}")
     return existing_ids
 
-def filter_duplicate_matches(match_lines, existing_match_ids):
-    """Filter out matches that already exist based on MatchID"""
-    unique_matches = []
-    duplicate_count = 0
-    
-    for line in match_lines:
-        parts = line.strip().split(DELIMITER)
-        if len(parts) >= 7:
-            match_id = parts[6].strip()  # MatchID is at index 6
-            if match_id not in existing_match_ids:
-                unique_matches.append(line)
-                existing_match_ids.add(match_id)  # Add to set to avoid duplicates within this batch
+def insert_match_to_database(match_data):
+    """Insert or update match data directly to MySQL database"""
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            # Parse match data
+            date_str, league_name, home_team, away_team, ko_time, match_link, match_id, download_flag, has_ended, uuid = match_data
+            
+            # Convert date format from YYYYMMDD to YYYY-MM-DD
+            if len(date_str) == 8 and date_str.isdigit():
+                match_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
             else:
-                duplicate_count += 1
-                print(f"  Skipping duplicate match ID: {match_id}")
-    
-    if duplicate_count > 0:
-        print(f"  Filtered out {duplicate_count} duplicate matches")
-    
-    return unique_matches
+                print(f"⚠️  Invalid date format: {date_str}")
+                return False
+            
+            # Clean data
+            kickoff_time = ko_time if ko_time != 'N/A' else None
+            match_link_clean = match_link if match_link != 'N/A' else None
+            match_id_clean = match_id if match_id != 'N/A' else None
+            uuid_clean = uuid if uuid != 'N/A' else None
+            download_flag_int = int(download_flag) if download_flag.isdigit() else 0
+            has_ended_int = int(has_ended) if has_ended.isdigit() else 0
+            
+            # Insert or update
+            insert_sql = """
+            INSERT INTO fotmob_events 
+            (match_date, league_name, home_team, away_team, kickoff_time, 
+             match_link, match_id, uuid, download_flag, has_ended)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+            league_name = VALUES(league_name),
+            home_team = VALUES(home_team),
+            away_team = VALUES(away_team),
+            kickoff_time = VALUES(kickoff_time),
+            match_link = VALUES(match_link),
+            uuid = VALUES(uuid),
+            download_flag = VALUES(download_flag),
+            has_ended = VALUES(has_ended),
+            updated_at = CURRENT_TIMESTAMP
+            """
+            
+            cursor.execute(insert_sql, (
+                match_date, league_name, home_team, away_team, 
+                kickoff_time, match_link_clean, match_id_clean, uuid_clean, 
+                download_flag_int, has_ended_int
+            ))
+            
+        connection.close()
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error inserting match to database: {e}")
+        return False
 
 def scrape_fotmob_matches(driver, date_str):
     url = f"{FOTMOB_BASE_URL}?date={date_str}"
@@ -288,8 +337,8 @@ def scrape_fotmob_matches(driver, date_str):
                     except NoSuchElementException:
                         status_text = ""
                     has_ended = get_has_ended_status(status_text)
-                    # Compose line with download_flag = 0 and has_ended
-                    match_line_data = [
+                    # Create match data tuple for database insertion
+                    match_data = (
                         date_str,
                         league_name,
                         home_team,
@@ -297,11 +346,11 @@ def scrape_fotmob_matches(driver, date_str):
                         ko_time,
                         match_link,
                         match_id,
-                        "0",         # download_flag
-                        has_ended    # has_ended
-                    ]
-                    match_line = DELIMITER.join(match_line_data)
-                    all_match_data_lines.append(match_line + "\n")
+                        "0",  # download_flag
+                        has_ended,
+                        None  # UUID - left blank for FotMob scraper
+                    )
+                    all_match_data_lines.append(match_data)
                     print(f"  {home_team} vs {away_team} at {ko_time} ({match_id}) | HasEnded: {has_ended}")
                 except Exception as e:
                     print(f"  Error extracting match: {e}")
@@ -314,61 +363,49 @@ if __name__ == "__main__":
         today.strftime("%Y%m%d"),
         (today + datetime.timedelta(days=1)).strftime("%Y%m%d")
     ]
-    if not os.path.exists(OUTPUT_DIRECTORY):
-        os.makedirs(OUTPUT_DIRECTORY)
-    print(f"Output will be appended to: {OUTPUT_FILE_PATH}")
+    
+    print("🏗️  FotMob Scraper with Direct MySQL Integration")
+    print("📊 Connecting to MySQL database...")
 
     # Get existing match IDs to avoid duplicates
-    print("Reading existing match IDs to avoid duplicates...")
-    existing_match_ids = get_existing_match_ids(OUTPUT_FILE_PATH)
-    print(f"Found {len(existing_match_ids)} existing match IDs")
+    print("Reading existing match IDs from database to avoid duplicates...")
+    existing_match_ids = get_existing_match_ids()
 
     driver = setup_driver()
     if driver:
         try:
-            file_exists = os.path.exists(OUTPUT_FILE_PATH)
-            all_new_matches = []
+            total_inserted = 0
+            total_updated = 0
+            total_skipped = 0
             
-            # Collect all matches first
+            # Process each date
             for date_str in dates_to_scrape:
-                print(f"--- Fotmob Scraper Initializing for Date: {date_str} ---")
-                lines = scrape_fotmob_matches(driver, date_str)
+                print(f"--- FotMob Scraper Processing Date: {date_str} ---")
+                match_data_list = scrape_fotmob_matches(driver, date_str)
                 
-                # Process each line (fix N/A times)
-                processed_lines = []
-                for line in lines:
-                    parts = line.strip().split(DELIMITER)
-                    if len(parts) == 9 and parts[4].strip().upper() == "N/A":
-                        parts[8] = "1"
-                        line = DELIMITER.join(parts) + "\n"
-                    processed_lines.append(line)
+                print(f"📋 Found {len(match_data_list)} matches for {date_str}")
                 
-                all_new_matches.extend(processed_lines)
-            
-            # Filter out duplicates
-            print(f"\nFiltering duplicates from {len(all_new_matches)} scraped matches...")
-            unique_matches = filter_duplicate_matches(all_new_matches, existing_match_ids)
-            print(f"Found {len(unique_matches)} new unique matches to add")
-            
-            # Write to file
-            if unique_matches:
-                with open(OUTPUT_FILE_PATH, 'a', encoding='utf-8') as f:
-                    if not file_exists:
-                        header = DELIMITER.join([
-                            "MatchDate", "LeagueName", "HomeTeam", "AwayTeam",
-                            "KickOffTime", "MatchLink", "MatchID", "DownloadFlag", "HasEnded"
-                        ]) + "\n"
-                        f.write(header)
-                    # Add a single new line before the first append if file already exists and is not empty
-                    elif file_exists and os.path.getsize(OUTPUT_FILE_PATH) > 0:
-                        f.write("\n")
+                # Insert each match directly to database
+                for match_data in match_data_list:
+                    match_id = match_data[6]  # match_id is at index 6
                     
-                    for line in unique_matches:
-                        f.write(line)
+                    if match_id in existing_match_ids:
+                        print(f"  ⏭️  Skipping duplicate: {match_data[2]} vs {match_data[3]} (ID: {match_id})")
+                        total_skipped += 1
+                        continue
+                    
+                    # Insert to database
+                    if insert_match_to_database(match_data):
+                        print(f"  ✅ Inserted: {match_data[2]} vs {match_data[3]} ({match_data[1]})")
+                        existing_match_ids.add(match_id)  # Add to set to avoid duplicates in this batch
+                        total_inserted += 1
+                    else:
+                        print(f"  ❌ Failed to insert: {match_data[2]} vs {match_data[3]}")
                 
-                print(f"\nAppended {len(unique_matches)} new match data lines for {', '.join(dates_to_scrape)} to: {OUTPUT_FILE_PATH}")
-            else:
-                print(f"\nNo new matches to add - all scraped matches already exist in: {OUTPUT_FILE_PATH}")
+            print(f"\n📊 Database Update Summary:")
+            print(f"  ✅ Inserted: {total_inserted} matches")
+            print(f"  ⏭️  Skipped (duplicates): {total_skipped} matches")
+            print(f"  📋 Total processed: {total_inserted + total_skipped} matches")
                 
         finally:
             driver.quit()

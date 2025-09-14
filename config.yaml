@@ -1,0 +1,76 @@
+# Database Configuration
+database:
+  mysql:
+    host: localhost
+    user: root
+    password: Amanpreet
+    database: sports_events
+    charset: utf8mb4
+    autocommit: true
+    ssl_disabled: true
+    
+# Application Settings
+app:
+  headless_mode: true
+  browser_path: "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+  
+# FotMob Configuration
+fotmob:
+  base_url: "https://www.fotmob.com/"
+  target_leagues:
+    - "England - Premier League"
+    - "Spain - LaLiga"
+    - "Germany - Bundesliga"
+    - "Italy - Serie A"
+    - "France - Ligue 1"
+    - "Japan - J. League"
+    - "United States - Major League Soccer"
+    - "Argentina - Liga Profesional Clausura"
+    - "Austria - Bundesliga"
+    - "Brazil - Serie A"
+    - "Egypt - Premier League"
+    - "Türkiye - Super Lig"
+    - "Netherlands - Eredivisie"
+    - "Portugal - Liga Portugal"
+    - "China - Super League"
+    - "Russia - Premier League"
+    - "Scotland - Premiership"
+    - "Denmark - Superligaen"
+    - "Sweden - Allsvenskan"
+    - "World Cup Qualification UEFA"
+    - "Germany - Frauen-Bundesliga"
+    - "Spain - LaLiga2"
+    - "World Cup Qualification CONCACAF"
+    - "World Cup Qualification CONMEBOL"
+    - "Saudi Arabia - Saudi Pro League"
+    - "Spain - Liga F"
+
+# Melbet Configuration  
+melbet:
+  target_leagues:
+    - "England. Premier League"
+    - "Spain. LaLiga"
+    - "Germany. Bundesliga"
+    - "Italy. Serie A"
+    - "France. Ligue 1"
+    - "Japan. J-League"
+    - "USA. Major League Soccer"
+    - "Argentina. Liga Profesional"
+    - "Austria. Bundesliga"
+    - "Brazil. Serie A"
+    - "Egypt. Premier League"
+    - "Turkey. Super Lig"
+    - "Netherlands. Eredivisie"
+    - "Portugal. Primeira Liga"
+    - "China. Super League"
+    - "Russia. Premier League"
+    - "Scotland. Premiership"
+    - "Denmark. Superliga"
+    - "Sweden. Allsvenskan"
+    - "World Cup 2026 Qualification. UEFA"
+    - "Friendlies. National Teams"
+    - "Germany. Bundesliga. Women"
+    - "Spain. Segunda Division"
+    - "World Cup 2026 Qualification. CONCACAF"
+    - "Saudi Arabia. Saudi Professional League"
+    - "Spain. Primera Division. Women"

@@ -4,7 +4,7 @@ import time
 import os
 import sys # For exit codes
 
-import config # Your configuration file
+from utils.core import config # Your configuration file
 from market_data_worker import record_market_data_for_event # Worker function
 
 # It's cleaner if setup_main_driver_for_listing_initial_scan also uses a robust method

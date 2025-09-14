@@ -23,9 +23,7 @@ import re
 import tempfile
 import shutil
 
-import config
-
-import config # Your configuration file
+from utils.core import config # Your configuration file
 
 def slugify(text):
     if not text: return "unknown_event"

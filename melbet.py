@@ -5,7 +5,7 @@ import os
 import re
 import logging
 import pdb  # For debugging purposes, remove in production
-from log_utils import get_dated_log_path
+from utils.core.log_utils import get_dated_log_path
 
 def extract_team_names_from_response(data):
     """

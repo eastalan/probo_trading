@@ -11,7 +11,7 @@ import time
 import os
 import re 
 
-import config # Import global configurations
+from utils.core import config # Import global configurations
 
 def setup_driver_for_event_lister():
     options = Options()

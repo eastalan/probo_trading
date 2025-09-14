@@ -12,7 +12,7 @@ import os
 import json
 import re
 
-import config  # Import global config
+from utils.core import config  # Import global config
 
 
 def slugify_filename(text):

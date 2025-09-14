@@ -7,12 +7,16 @@ import pdb
 import re
 import pandas as pd
 import threading
+import signal
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from process_utils import kill_old_socket_processes
+from utils.core.process_utils import kill_old_socket_processes
+from utils.db.fotmob_db_manager import FotMobDBManager
+from utils.core.process_match_db import process_match_uuid_and_socket_db, already_running
 
 FOTMOB_MATCHES_FILE = os.path.join("data", "event_data", "fotmob_matches.psv")
 FOTMOB_SOCKET_SCRIPT = os.path.join(os.path.dirname(__file__), "fotmob_socket.py")
-FOTMOB_UUID_EXTRACTOR = os.path.join(os.path.dirname(__file__), "fotmob_uuid_extractor.py")
+FOTMOB_UUID_EXTRACTOR = os.path.join(os.path.dirname(__file__), "utils", "core", "fotmob_uuid_extractor.py")
 POLL_INTERVAL_SECONDS = 30  # How often to check for new matches
 
 def parse_ko_time(ko_time_str, match_date_str):
@@ -131,8 +135,8 @@ def process_match_uuid_and_socket(match_data, df, running_workers, temp_files):
                 
                 # Fix import path for log_utils since we're in temp_sockets subdirectory
                 modified_content = modified_content.replace(
-                    'from log_utils import get_dated_log_path',
-                    'import sys\nimport os\nsys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))\nfrom log_utils import get_dated_log_path'
+                    'from utils.core.log_utils import get_dated_log_path',
+                    'import sys\nimport os\nsys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))\nfrom utils.core.log_utils import get_dated_log_path'
                 )
                 
                 # Write the modified script to the main directory
@@ -198,9 +202,42 @@ def cleanup_temp_files():
     except Exception as e:
         print(f"Error cleaning up temp files: {e}")
 
+# Global variables for signal handling
+running_workers = {}  # match_id: subprocess.Popen
+temp_files = set()  # Track temporary files for cleanup
+
+def signal_handler(signum, frame):
+    """Handle SIGINT (Ctrl+C) gracefully by terminating all subprocesses"""
+    print("\n🛑 Received interrupt signal, shutting down gracefully...")
+    
+    # Terminate all running worker processes
+    for match_id, proc in running_workers.items():
+        try:
+            print(f"Terminating worker for match {match_id}...")
+            proc.terminate()
+            # Give process 3 seconds to terminate gracefully
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                print(f"Force killing worker for match {match_id}...")
+                proc.kill()
+        except Exception as e:
+            print(f"Error terminating worker {match_id}: {e}")
+    
+    # Clean up temp files
+    cleanup_temp_files()
+    
+    # Kill any remaining socket processes
+    kill_old_socket_processes(max_age_seconds=0)  # Kill all socket processes
+    
+    print("✅ Shutdown complete")
+    sys.exit(0)
+
 def main():
-    running_workers = {}  # match_id: subprocess.Popen
-    temp_files = set()  # Track temporary files for cleanup
+    global running_workers, temp_files
+    
+    # Register signal handler for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
 
     while True:
         now = datetime.datetime.now()
@@ -209,38 +246,43 @@ def main():
             print(f"Match file not found: {FOTMOB_MATCHES_FILE}")
             raise(FileNotFoundError(f"Match file not found: {FOTMOB_MATCHES_FILE}"))
         
-        # Read data as DataFrame for efficient processing
-        df = pd.read_csv(FOTMOB_MATCHES_FILE, delimiter="|", dtype=str)
+        # Use the new ko_datetime column for time-based filtering
+        # Get matches within the last 4 hours and upcoming matches
+        four_hours_ago = now - datetime.timedelta(hours=4)
         
-        # Filter for today's matches only
-        today_matches = df[df['MatchDate'] == today_str].copy()
+        # Get all matches in the time window (4 hours ago to now)
+        with FotMobDBManager() as db:
+            all_processable_matches = db.get_processable_matches_in_time_window(four_hours_ago, now)
         
-        # Auto-expire matches: Set HasEnded=1 for matches >3.5 hours past KO time
-        for idx, row in today_matches.iterrows():
-            ko_dt = parse_ko_time(row['KickOffTime'], row['MatchDate'])
-            if ko_dt and (now - ko_dt).total_seconds() > 3.5 * 3600:
-                df.loc[idx, 'HasEnded'] = '1'
+        # Get all matches for sleep calculation (including future matches)
+        with FotMobDBManager() as db:
+            all_matches = db.get_upcoming_matches(now)
         
-        # Reset matches with invalid UUIDs so they can be reprocessed
-        for idx, row in today_matches.iterrows():
-            current_uuid = row.get("UUID", "")
-            if (row['DownloadFlag'] == '1' and row['HasEnded'] != '1' and 
-                (pd.isna(current_uuid) or str(current_uuid).strip() in ["", "nan", "NaN"])):
-                print(f"Resetting match {row['MatchID']} with invalid UUID for reprocessing")
-                df.loc[idx, 'DownloadFlag'] = '0'
+        if not all_matches:
+            print(f"No matches found")
+            time.sleep(POLL_INTERVAL_SECONDS)
+            continue
         
-        # Get matches that need processing: not ended, with DownloadFlag 0 or 1
-        processable_matches = today_matches[
-            (today_matches['HasEnded'] != '1') & 
-            ((today_matches['DownloadFlag'] == '0') | (today_matches['DownloadFlag'] == '1'))
-        ]
+        # Auto-expire matches and reset invalid UUIDs for both dates
+        with FotMobDBManager() as db:
+            total_expired = 0
+            total_reset = 0
+            total_expired += db.bulk_update_expired_matches(today_str, 3.5)
+            total_reset += db.reset_invalid_uuids(today_str)
+            
+            if total_expired > 0:
+                print(f"Auto-expired {total_expired} matches")
+            if total_reset > 0:
+                print(f"Reset {total_reset} matches with invalid UUIDs")
         
         # Process matches in parallel for UUID extraction and socket spawning
-        matches_to_process = []
-        for idx, row in processable_matches.iterrows():
-            ko_dt = parse_ko_time(row['KickOffTime'], row['MatchDate'])
-            if ko_dt and ko_dt <= now:
-                matches_to_process.append((idx, row))
+        # All matches from the query are already within the 4-hour window
+        matches_to_process = all_processable_matches
+        
+        for match in matches_to_process:
+            ko_dt = match.get('ko_datetime')
+            if ko_dt:
+                print(f"Match {match['match_id']} ({match['home_team']} vs {match['away_team']}) started at {ko_dt.strftime('%H:%M')} - within 4hr window")
         
         if matches_to_process:
             print(f"Processing {len(matches_to_process)} started matches in parallel...")
@@ -249,7 +291,7 @@ def main():
             with ThreadPoolExecutor(max_workers=min(20, len(matches_to_process))) as executor:
                 # Submit all matches for processing
                 future_to_match = {
-                    executor.submit(process_match_uuid_and_socket, match_data, df, running_workers, temp_files): match_data[1]['MatchID']
+                    executor.submit(process_match_uuid_and_socket_db, match_data, running_workers, temp_files): match_data['match_id']
                     for match_data in matches_to_process
                 }
                 
@@ -265,9 +307,7 @@ def main():
                     except Exception as e:
                         print(f"Exception processing match {match_id}: {e}")
             
-            # Save DataFrame after all parallel processing is complete
-            df.to_csv(FOTMOB_MATCHES_FILE, sep="|", index=False)
-            print("Saved all UUID updates to PSV file")
+            print("Completed parallel processing of matches")
 
         # Clean up finished workers and their temp files
         finished = [mid for mid, proc in running_workers.items() if proc.poll() is not None]
@@ -309,7 +349,8 @@ def main():
         
         # Clean up inactive workers
         for mid in inactive_workers:
-            temp_file = os.path.join("temp_sockets", f"fotmob_socket_{mid}.py")
+            # Temp files are created in utils/core/temp_sockets/
+            temp_file = os.path.join("utils", "core", "temp_sockets", f"fotmob_socket_{mid}.py")
             if temp_file in temp_files:
                 try:
                     os.remove(temp_file)
@@ -320,33 +361,27 @@ def main():
             if mid in running_workers:
                 del running_workers[mid]
 
-        # Write back the updated DataFrame (only if not already written during UUID extraction)
-        df.to_csv(FOTMOB_MATCHES_FILE, sep="|", index=False)
+        # Database updates are handled automatically in process functions
 
         # Calculate sleep time until next match starts
-        next_match_time = None
-        upcoming_matches = []
-        
-        for idx, row in today_matches.iterrows():
-            if row['HasEnded'] == '1':
-                continue
-            ko_dt = parse_ko_time(row['KickOffTime'], row['MatchDate'])
-            if ko_dt and ko_dt > now:
-                upcoming_matches.append(ko_dt)
-        
-        if upcoming_matches:
-            next_match_time = min(upcoming_matches)
-            time_until_next = int((next_match_time - now).total_seconds())
-            # Sleep until 5 minutes before next match, but at least 30 seconds
-            sleep_seconds = max(30, time_until_next - 300)  # 300 = 5 minutes buffer
-            next_match_str = next_match_time.strftime("%H:%M")
-            if sleep_seconds > 300:
-                print(f"Completed processing cycle. Next match at {next_match_str}, sleeping for {sleep_seconds} seconds ({sleep_seconds//60:.1f} minutes)...")
+        # all_matches already contains upcoming matches sorted by ko_datetime
+        if all_matches:
+            next_match = all_matches[0]  # First match is the earliest
+            next_match_time = next_match.get('ko_datetime')
+            
+            if next_match_time:
+                time_until_next = (next_match_time - now).total_seconds()
+                # Sleep until 5 minutes before next match, but at least 30 seconds
+                sleep_seconds = max(30, time_until_next - 300)  # 300 = 5 minutes buffer
             else:
-                print(f"Completed processing cycle. Next match at {next_match_str}, sleeping for {sleep_seconds} seconds...")
+                sleep_seconds = 300  # Default 5 minutes if no ko_datetime
         else:
-            sleep_seconds = POLL_INTERVAL_SECONDS
-            print(f"Completed processing cycle. No upcoming matches today, sleeping for {sleep_seconds} seconds...")
+            sleep_seconds = 300  # Default 5 minutes if no upcoming matches
+        
+        if all_matches and next_match_time:
+            print(f"Next match at {next_match_time.strftime('%H:%M')} - sleeping for {sleep_seconds/60:.1f} minutes")
+        else:
+            print("No upcoming matches found - sleeping for 5 minutes")
         
         time.sleep(sleep_seconds)
 
@@ -356,11 +391,14 @@ if __name__ == "__main__":
         cleanup_temp_files()
         main()
     except KeyboardInterrupt:
-        print("\nShutting down runner...")
-        # Clean up temp files on exit
-        cleanup_temp_files()
-        # Kill any stray socket processes older than 2 hours
-        kill_old_socket_processes(max_age_seconds=2*3600)
+        # This should not be reached due to signal handler, but keep as backup
+        signal_handler(signal.SIGINT, None)
     except Exception as e:
         print(f"Fatal error: {e}")
         cleanup_temp_files()
+        # Terminate any running workers on fatal error
+        for match_id, proc in running_workers.items():
+            try:
+                proc.terminate()
+            except:
+                pass

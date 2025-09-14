@@ -6,7 +6,7 @@ import datetime
 import ssl
 import argparse
 import requests
-from log_utils import get_dated_log_path
+from utils.core.log_utils import get_dated_log_path
 
 # Configuration
 GAME_ID = 651744976
@@ -18,6 +18,8 @@ PROTOCOL_SENT = False
 CONNECT_CLIENT_SENT = False
 SEND_NO_MESSAGES = False
 SESSION_ID = None
+MAX_RECONNECT_ATTEMPTS = 3
+RECONNECT_DELAY = 10
 
 # Log path will be set after parsing arguments
 log_path = None
@@ -140,11 +142,25 @@ def on_error(ws, error):
     """Handle WebSocket errors"""
     print(f"WebSocket error: {error}")
     log_data("ERROR", f"WebSocket error: {error}")
+    
+    # Check if it's a connection reset error - close the connection to trigger reconnection
+    if "Connection reset by peer" in str(error) or "[Errno 54]" in str(error):
+        print("Connection reset detected - closing connection to trigger reconnection")
+        log_data("ERROR", "Connection reset by peer detected - closing connection")
+        ws.close()
 
 def on_close(ws, close_status_code, close_msg):
     """Handle WebSocket close"""
     print(f"Connection closed: {close_status_code} - {close_msg}")
     log_data("CLOSE", f"Connection closed: {close_status_code} - {close_msg}")
+    
+    # Reset connection state flags for reconnection
+    global PROTOCOL_SENT, CONNECT_CLIENT_SENT
+    PROTOCOL_SENT = False
+    CONNECT_CLIENT_SENT = False
+    
+    # Mark that reconnection should happen
+    ws.should_reconnect = True
 
 def on_open(ws):
     """Called when WebSocket connection is opened"""
@@ -199,6 +215,67 @@ def create_websocket():
         on_close=on_close
     )
 
+def connect_with_retry():
+    """Connect to WebSocket with retry logic"""
+    attempt = 0
+    
+    while attempt <= MAX_RECONNECT_ATTEMPTS:
+        try:
+            if attempt == 0:
+                print("Initial connection attempt")
+                log_data("INFO", "Initial connection attempt")
+            else:
+                print(f"Reconnection attempt {attempt}/{MAX_RECONNECT_ATTEMPTS}")
+                log_data("INFO", f"Reconnection attempt {attempt}/{MAX_RECONNECT_ATTEMPTS}")
+            
+            ws = create_websocket()
+            ws.should_reconnect = False
+            ws.run_forever()
+            
+            # Check if we should reconnect after connection closes
+            if hasattr(ws, 'should_reconnect') and ws.should_reconnect and attempt < MAX_RECONNECT_ATTEMPTS:
+                attempt += 1
+                print(f"Connection lost - waiting {RECONNECT_DELAY} seconds before reconnection...")
+                log_data("INFO", f"Connection lost - waiting {RECONNECT_DELAY} seconds before reconnection attempt {attempt}")
+                time.sleep(RECONNECT_DELAY)
+                continue
+            else:
+                # Normal exit or max attempts reached
+                if attempt >= MAX_RECONNECT_ATTEMPTS:
+                    print(f"Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) reached")
+                    log_data("ERROR", f"Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) reached")
+                break
+            
+        except KeyboardInterrupt:
+            print("\nStopped by user")
+            log_data("INFO", "Stopped by user")
+            break
+        except Exception as e:
+            error_str = str(e)
+            print(f"Connection failed: {error_str}")
+            log_data("ERROR", f"Connection attempt failed: {error_str}")
+            
+            # Check if it's a recoverable connection error
+            if ("Connection reset by peer" in error_str or 
+                "[Errno 54]" in error_str or
+                "Connection refused" in error_str or
+                "Connection aborted" in error_str):
+                
+                if attempt < MAX_RECONNECT_ATTEMPTS:
+                    attempt += 1
+                    print(f"Waiting {RECONNECT_DELAY} seconds before retry...")
+                    log_data("INFO", f"Waiting {RECONNECT_DELAY} seconds before retry {attempt}")
+                    time.sleep(RECONNECT_DELAY)
+                else:
+                    print(f"Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) reached")
+                    log_data("ERROR", f"Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) reached")
+                    break
+            else:
+                # For other errors, don't retry
+                print(f"Non-recoverable error: {error_str}")
+                log_data("ERROR", f"Non-recoverable error: {error_str}")
+                break
+
 def main():
     """Main function"""
     global GAME_ID, SPORT, LANGUAGE, SEND_NO_MESSAGES, SESSION_ID, log_path
@@ -229,20 +306,22 @@ def main():
     print(f"Session ID: {SESSION_ID}")
     print(f"No messages mode: {SEND_NO_MESSAGES}")
     print(f"Log file: {log_path}")
+    print(f"Max reconnect attempts: {MAX_RECONNECT_ATTEMPTS}")
+    print(f"Reconnect delay: {RECONNECT_DELAY} seconds")
     print("=" * 50)
     print("Running... Press Ctrl+C to stop")
     
     try:
-        ws = create_websocket()
-        ws.run_forever()
+        connect_with_retry()
     except KeyboardInterrupt:
         print("\nStopped by user")
+        log_data("INFO", "Stopped by user")
     except Exception as e:
-        print(f"Error: {e}")
-        log_data("ERROR", f"Main error: {e}")
-        print("\n🛑 Shutting down...")
-        ws.close()
-        ws_thread.join(timeout=5)
+        print(f"Fatal error: {e}")
+        log_data("ERROR", f"Fatal error: {e}")
+    
+    print("\nMaxiZone client shutting down")
+    log_data("INFO", "MaxiZone client shutting down")
 
 if __name__ == "__main__":
     main()

@@ -5,7 +5,7 @@ import os
 import re
 from datetime import datetime
 import logging
-from log_utils import get_dated_log_path
+from utils.core.log_utils import get_dated_log_path
 
 def sanitize_filename(filename):
     """Sanitize filename by removing/replacing invalid characters"""

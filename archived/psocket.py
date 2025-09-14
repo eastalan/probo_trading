@@ -4,7 +4,7 @@ import json
 import time
 import os
 import datetime
-from log_utils import get_dated_log_path
+from utils.core.log_utils import get_dated_log_path
 
 EVENT_ID = "4383763"#"42["subscribe_ltp_stream",4383757]81]
 SUBSCRIBE_SENT = False

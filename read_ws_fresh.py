@@ -3,7 +3,7 @@ import os
 import re # For slugify and class regex
 import datetime # For timestamps and file headers
 import platform # To help determine OS for profile paths
-from log_utils import get_dated_log_path
+from utils.core.log_utils import get_dated_log_path
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service as ChromeService
