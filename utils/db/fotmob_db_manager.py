@@ -101,6 +101,7 @@ class FotMobDBManager:
     def get_processable_matches_in_time_window(self, start_datetime, end_datetime):
         """
         Get processable matches within a specific datetime window
+        Includes matches that need UUID extraction (uuid IS NULL or empty)
         """
         self.connect()
         
@@ -109,9 +110,6 @@ class FotMobDBManager:
                ko_datetime, match_link, uuid, download_flag, has_ended, match_date
         FROM fotmob_events 
         WHERE ko_datetime BETWEEN %s AND %s
-          AND uuid IS NOT NULL 
-          AND uuid != '' 
-          AND download_flag = 0
           AND has_ended = 0
         ORDER BY ko_datetime
         '''
@@ -146,6 +144,7 @@ class FotMobDBManager:
         except Exception as e:
             print(f"Error fetching upcoming matches: {e}")
             return []
+    
     
     def update_match_uuid(self, match_id: str, uuid: str) -> bool:
         """Update UUID for a specific match"""

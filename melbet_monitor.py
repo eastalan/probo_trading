@@ -3,6 +3,7 @@ import json
 import time
 import os
 import re
+import yaml
 from datetime import datetime
 import logging
 from utils.core.log_utils import get_dated_log_path
@@ -61,40 +62,22 @@ def load_events_from_psv(psv_file='event_data/melbet_events.psv'):
     
     return events
 
+def load_config():
+    """Load configuration from config.yaml"""
+    try:
+        with open('config.yaml', 'r') as file:
+            return yaml.safe_load(file)
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Error loading config: {e}")
+        return {}
+
 def discover_live_matches():
     """Discover current live matches from 1X2 API"""
     logger = logging.getLogger(__name__)
     
-    # Target leagues to monitor
-    target_leagues = [
-        "England. Premier League",
-        "Spain. La Liga",
-        "Spain. LaLiga", 
-        "Germany. Bundesliga",
-        "Italy. Serie A",
-        "France. Ligue 1",
-        "Champions League",
-        "Europa League",
-        "USA. MLS",
-        "Japan. J-League",
-        "Argentina. Primera Division",
-        "Turkey. SuperLiga",
-        "Austria. Bundesliga",
-        "Netherlands. Eredivisie",
-        "Portugal. Primeira Liga",
-        "Brazil. Campeonato Brasileiro. Serie A",
-        "Russia. Premier League",
-        "Scotland. Premier League",
-        "China. Super League",
-        "Denmark. Superliga",
-        "Sweden. Allsvenskan",
-        "Norway. Eliteserien",
-        "World Cup 2026 Qualification. Europe",
-        "Friendlies. National Teams",
-        "Germany. Bundesliga. Women",
-        "Spain. Segunda Division",
-        "World Cup 2026 Qualification. CONCACAF"   
-]
+    # Load target leagues from config file
+    config = load_config()
+    target_leagues = config.get('melbet', {}).get('target_leagues', [])
     
     data = fetch_1x2_data()
     matches = {}

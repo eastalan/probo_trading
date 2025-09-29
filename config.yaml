@@ -44,6 +44,8 @@ fotmob:
     - "World Cup Qualification CONMEBOL"
     - "Saudi Arabia - Saudi Pro League"
     - "Spain - Liga F"
+    - "Champions League"
+    - "England - Championship"
 
 # Melbet Configuration  
 melbet:
@@ -74,3 +76,5 @@ melbet:
     - "World Cup 2026 Qualification. CONCACAF"
     - "Saudi Arabia. Saudi Professional League"
     - "Spain. Primera Division. Women"
+    - "UEFA Champions League"
+    - "England. Championship"

@@ -214,17 +214,31 @@ def insert_match_to_database(match_data):
             download_flag_int = int(download_flag) if download_flag.isdigit() else 0
             has_ended_int = int(has_ended) if has_ended.isdigit() else 0
             
+            # Calculate ko_datetime from match_date and kickoff_time
+            ko_datetime = None
+            if kickoff_time:
+                try:
+                    # Try parsing as 12-hour format first
+                    ko_datetime = datetime.datetime.strptime(f"{match_date} {kickoff_time}", '%Y-%m-%d %I:%M %p')
+                except ValueError:
+                    try:
+                        # Try parsing as 24-hour format
+                        ko_datetime = datetime.datetime.strptime(f"{match_date} {kickoff_time}", '%Y-%m-%d %H:%M')
+                    except ValueError:
+                        pass
+            
             # Insert or update
             insert_sql = """
             INSERT INTO fotmob_events 
-            (match_date, league_name, home_team, away_team, kickoff_time, 
+            (match_date, league_name, home_team, away_team, kickoff_time, ko_datetime,
              match_link, match_id, uuid, download_flag, has_ended)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
             league_name = VALUES(league_name),
             home_team = VALUES(home_team),
             away_team = VALUES(away_team),
             kickoff_time = VALUES(kickoff_time),
+            ko_datetime = VALUES(ko_datetime),
             match_link = VALUES(match_link),
             uuid = VALUES(uuid),
             download_flag = VALUES(download_flag),
@@ -234,7 +248,7 @@ def insert_match_to_database(match_data):
             
             cursor.execute(insert_sql, (
                 match_date, league_name, home_team, away_team, 
-                kickoff_time, match_link_clean, match_id_clean, uuid_clean, 
+                kickoff_time, ko_datetime, match_link_clean, match_id_clean, uuid_clean, 
                 download_flag_int, has_ended_int
             ))
             
@@ -359,9 +373,10 @@ def scrape_fotmob_matches(driver, date_str):
 
 if __name__ == "__main__":
     today = datetime.date.today()
+    # Scrape for the whole week ahead (7 days)
     dates_to_scrape = [
-        today.strftime("%Y%m%d"),
-        (today + datetime.timedelta(days=1)).strftime("%Y%m%d")
+        (today + datetime.timedelta(days=i)).strftime("%Y%m%d") 
+        for i in range(7)
     ]
     
     print("🏗️  FotMob Scraper with Direct MySQL Integration")
