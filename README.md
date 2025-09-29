@@ -61,11 +61,11 @@ flowchart LR
   A2 --> B
   A3 --> B
   A4 --> B
-  B --> C[Structured Storage (MySQL)]:::db
-  C --> D[Odds + Events Fusion]:::proc
-  D --> E[Signal Detection / Pre‑move Alerts]:::alert
-  E --> F[Execution Hooks (Bet Placer)]:::exec
-  C --> G[Analytics / Modeling]:::ana
+  B --> C[Structured Storage MySQL]:::db
+  C --> D[Odds Events Fusion]:::proc
+  D --> E[Signal Detection PreMove Alerts]:::alert
+  E --> F[Execution Hooks Bet Placer]:::exec
+  C --> G[Analytics Modeling]:::ana
 
   classDef src fill:#F0F4F8,stroke:#94A3B8,color:#111827
   classDef ws fill:#E0F2FE,stroke:#38BDF8,color:#0C4A6E
